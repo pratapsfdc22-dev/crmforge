@@ -1,0 +1,17 @@
+{
+  "name": "@forgesf/db",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "generate": "supabase gen types typescript --local > src/types.ts",
+    "build": "echo 'No build needed for migrations'",
+    "lint": "echo 'No lint needed for migrations'",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'No tests for migrations'"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "supabase": "^1.191.3",
+    "typescript": "^5.5.4"
+  }
+}
