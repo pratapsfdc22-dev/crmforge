@@ -2,8 +2,11 @@
   "name": "@forgesf/db",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "generate": "supabase gen types typescript --local > src/types.ts",
+    "migrate": "node scripts/migrate.js",
+    "migrate:reset": "node scripts/migrate.js --reset",
+    "generate": "node scripts/generate-types.js",
     "build": "echo 'No build needed for migrations'",
     "lint": "echo 'No lint needed for migrations'",
     "typecheck": "tsc --noEmit",
