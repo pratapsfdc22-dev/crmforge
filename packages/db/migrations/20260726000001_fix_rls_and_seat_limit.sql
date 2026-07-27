@@ -7,9 +7,7 @@
 -- FIX 1: user_orgs() SECURITY DEFINER
 -- ============================================================================
 
--- Drop and recreate with SECURITY DEFINER
-DROP FUNCTION IF EXISTS user_orgs(UUID);
-
+-- Replace function with SECURITY DEFINER (no drop needed - CREATE OR REPLACE works)
 CREATE OR REPLACE FUNCTION user_orgs(user_uuid UUID)
 RETURNS SETOF UUID
 LANGUAGE SQL STABLE

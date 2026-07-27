@@ -35,7 +35,14 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 
 // Admin client (bypasses RLS)
 const adminClient = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false }
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false
+  },
+  db: {
+    schema: 'public'
+  }
 });
 
 // Test fixtures
@@ -43,6 +50,7 @@ let userA: { id: string; email: string; password: string; accessToken: string };
 let userB: { id: string; email: string; password: string; accessToken: string };
 let orgA: { id: string; name: string; slug: string };
 let orgB: { id: string; name: string; slug: string };
+let seatLimitTestOrg: { id: string; name: string; slug: string };
 
 // User-scoped clients (respect RLS)
 let clientA: SupabaseClient<Database>;
@@ -50,6 +58,29 @@ let clientB: SupabaseClient<Database>;
 
 describe('RLS Multi-Tenant Isolation', () => {
   beforeAll(async () => {
+    // Diagnostic: Check service role authentication
+    console.log('\n=== DIAGNOSTIC: Service Role Authentication ===');
+    console.log('SUPABASE_URL:', SUPABASE_URL);
+    console.log('SUPABASE_SERVICE_ROLE_KEY (first 20 chars):', SUPABASE_SERVICE_ROLE_KEY?.substring(0, 20));
+    console.log('SUPABASE_SERVICE_ROLE_KEY length:', SUPABASE_SERVICE_ROLE_KEY?.length);
+
+    // Try to query a simple table to see auth context
+    const { data: testQuery, error: testError } = await adminClient
+      .from('organizations')
+      .select('id')
+      .limit(1);
+
+    console.log('Test query succeeded:', !testError);
+    console.log('Test query error:', testError);
+
+    // Test is_service_role() function
+    const { data: serviceRoleCheck, error: serviceRoleError } = await adminClient
+      .rpc('is_service_role');
+
+    console.log('is_service_role() result:', serviceRoleCheck);
+    console.log('is_service_role() error:', serviceRoleError);
+    console.log('=== END DIAGNOSTIC ===\n');
+
     // Create test users
     const timestamp = Date.now();
     const emailA = `test-user-a-${timestamp}@example.com`;
@@ -180,6 +211,37 @@ describe('RLS Multi-Tenant Isolation', () => {
       slug: orgDataB.slug
     };
 
+    // Create seat limit test org
+    const seatLimitInsertData = {
+      name: `Seat Limit Test Org ${timestamp}`,
+      slug: `seat-limit-test-${timestamp}`,
+      tier: 'trial' as const,
+      seat_limit: 1
+    };
+
+    console.log('Attempting to create seat limit org with data:', JSON.stringify(seatLimitInsertData, null, 2));
+
+    const { data: seatLimitOrgData, error: seatLimitOrgError } = await adminClient
+      .from('organizations')
+      .insert(seatLimitInsertData)
+      .select()
+      .single();
+
+    if (seatLimitOrgError || !seatLimitOrgData) {
+      console.error('FULL ERROR OBJECT:', JSON.stringify(seatLimitOrgError, null, 2));
+      console.error('Error code:', seatLimitOrgError?.code);
+      console.error('Error message:', seatLimitOrgError?.message);
+      console.error('Error details:', seatLimitOrgError?.details);
+      console.error('Error hint:', seatLimitOrgError?.hint);
+      throw new Error(`Failed to create seat limit test org: ${seatLimitOrgError?.message}`);
+    }
+
+    seatLimitTestOrg = {
+      id: seatLimitOrgData.id,
+      name: seatLimitOrgData.name,
+      slug: seatLimitOrgData.slug
+    };
+
     // Create user-scoped clients
     clientA = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       global: {
@@ -219,6 +281,9 @@ describe('RLS Multi-Tenant Isolation', () => {
     }
     if (orgB?.id) {
       await adminClient.from('organizations').delete().eq('id', orgB.id);
+    }
+    if (seatLimitTestOrg?.id) {
+      await adminClient.from('organizations').delete().eq('id', seatLimitTestOrg.id);
     }
 
     console.log('✓ Test fixtures cleaned up');
@@ -326,8 +391,8 @@ describe('RLS Multi-Tenant Isolation', () => {
     let taskB: string;
 
     beforeAll(async () => {
-      // Create test tasks
-      const { data: taskDataA } = await adminClient
+      // Create test tasks using authenticated clients (as real users would)
+      const { data: taskDataA, error: errorA } = await clientA
         .from('ai_tasks')
         .insert({
           org_id: orgA.id,
@@ -338,7 +403,12 @@ describe('RLS Multi-Tenant Isolation', () => {
         .select()
         .single();
 
-      const { data: taskDataB } = await adminClient
+      if (errorA) {
+        console.error('Failed to create taskA:', errorA);
+        throw new Error(`Failed to create taskA: ${errorA.message}`);
+      }
+
+      const { data: taskDataB, error: errorB } = await clientB
         .from('ai_tasks')
         .insert({
           org_id: orgB.id,
@@ -348,6 +418,11 @@ describe('RLS Multi-Tenant Isolation', () => {
         })
         .select()
         .single();
+
+      if (errorB) {
+        console.error('Failed to create taskB:', errorB);
+        throw new Error(`Failed to create taskB: ${errorB.message}`);
+      }
 
       taskA = taskDataA!.id;
       taskB = taskDataB!.id;
@@ -397,7 +472,7 @@ describe('RLS Multi-Tenant Isolation', () => {
     let connB: string;
 
     beforeAll(async () => {
-      const { data: connDataA } = await adminClient
+      const { data: connDataA } = await clientA
         .from('salesforce_connections')
         .insert({
           org_id: orgA.id,
@@ -411,7 +486,7 @@ describe('RLS Multi-Tenant Isolation', () => {
         .select()
         .single();
 
-      const { data: connDataB } = await adminClient
+      const { data: connDataB } = await clientB
         .from('salesforce_connections')
         .insert({
           org_id: orgB.id,
@@ -459,7 +534,7 @@ describe('RLS Multi-Tenant Isolation', () => {
     let eventB: string;
 
     beforeAll(async () => {
-      const { data: eventDataA } = await adminClient
+      const { data: eventDataA } = await clientA
         .from('audit_events')
         .insert({
           org_id: orgA.id,
@@ -470,7 +545,7 @@ describe('RLS Multi-Tenant Isolation', () => {
         .select()
         .single();
 
-      const { data: eventDataB } = await adminClient
+      const { data: eventDataB } = await clientB
         .from('audit_events')
         .insert({
           org_id: orgB.id,
@@ -511,36 +586,24 @@ describe('RLS Multi-Tenant Isolation', () => {
 
   describe('Seat Limit Enforcement', () => {
     it('should enforce seat limit on org_members insert', async () => {
-      // Create a test org with seat_limit = 1
-      const { data: testOrg } = await adminClient
-        .from('organizations')
-        .insert({
-          name: 'Seat Limit Test Org',
-          slug: `seat-limit-test-${Date.now()}`,
-          tier: 'trial',
-          seat_limit: 1
-        })
-        .select()
-        .single();
-
-      expect(testOrg).toBeDefined();
+      // Test org already created in beforeAll with seat_limit = 1
 
       // Add first member (should succeed)
       const { error: firstMemberError } = await adminClient
         .from('org_members')
         .insert({
-          org_id: testOrg!.id,
+          org_id: seatLimitTestOrg.id,
           user_id: userA.id,
           role: 'owner'
         });
 
       expect(firstMemberError).toBeNull();
 
-      // Try to add second member (should fail)
+      // Try to add second member (should fail due to seat limit)
       const { error: secondMemberError } = await adminClient
         .from('org_members')
         .insert({
-          org_id: testOrg!.id,
+          org_id: seatLimitTestOrg.id,
           user_id: userB.id,
           role: 'developer'
         });
@@ -548,9 +611,8 @@ describe('RLS Multi-Tenant Isolation', () => {
       expect(secondMemberError).toBeDefined();
       expect(secondMemberError?.message).toContain('seat limit');
 
-      // Cleanup
-      await adminClient.from('org_members').delete().eq('org_id', testOrg!.id);
-      await adminClient.from('organizations').delete().eq('id', testOrg!.id);
+      // Cleanup members for this test
+      await adminClient.from('org_members').delete().eq('org_id', seatLimitTestOrg.id);
     });
   });
 });
