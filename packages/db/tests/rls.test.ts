@@ -28,9 +28,14 @@ envContent.split('\n').forEach(line => {
 
 const SUPABASE_URL = env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_ANON_KEY = env.SUPABASE_ANON_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in apps/api/.env');
+}
+
+if (!SUPABASE_ANON_KEY) {
+  throw new Error('Missing SUPABASE_ANON_KEY in apps/api/.env');
 }
 
 // Admin client (bypasses RLS)
@@ -165,8 +170,13 @@ describe('RLS Multi-Tenant Isolation', () => {
       throw new Error(`Failed to add user B to org B: ${memberErrorB.message}`);
     }
 
-    // Get access tokens for both users
-    const { data: sessionA, error: sessionErrorA } = await adminClient.auth.signInWithPassword({
+    // Get access tokens for both users using temporary clients
+    // (Don't use adminClient.auth.signIn as it would mutate adminClient's auth state)
+    const tempClientA = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false }
+    });
+
+    const { data: sessionA, error: sessionErrorA } = await tempClientA.auth.signInWithPassword({
       email: emailA,
       password
     });
@@ -175,7 +185,11 @@ describe('RLS Multi-Tenant Isolation', () => {
       throw new Error(`Failed to create session for user A: ${sessionErrorA?.message}`);
     }
 
-    const { data: sessionB, error: sessionErrorB } = await adminClient.auth.signInWithPassword({
+    const tempClientB = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false }
+    });
+
+    const { data: sessionB, error: sessionErrorB } = await tempClientB.auth.signInWithPassword({
       email: emailB,
       password
     });
@@ -242,8 +256,9 @@ describe('RLS Multi-Tenant Isolation', () => {
       slug: seatLimitOrgData.slug
     };
 
-    // Create user-scoped clients
-    clientA = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    // Create user-scoped clients using anon key + user access tokens
+    // (Must use anon key, not service role key, for RLS to be enforced)
+    clientA = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: {
         headers: {
           Authorization: `Bearer ${userA.accessToken}`
@@ -252,7 +267,7 @@ describe('RLS Multi-Tenant Isolation', () => {
       auth: { persistSession: false }
     });
 
-    clientB = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    clientB = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: {
         headers: {
           Authorization: `Bearer ${userB.accessToken}`
