@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { env } from "./config/env.js";
 import { healthRoutes } from "./routes/health.js";
+import { authRoutes } from "./routes/auth.js";
 
 const fastify = Fastify({
   logger: {
@@ -36,6 +37,7 @@ await fastify.register(cors, {
 });
 
 await fastify.register(healthRoutes);
+await fastify.register(authRoutes);
 
 const start = async () => {
   try {
