@@ -3,8 +3,12 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { Database } from '@forgesf/db/types';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { z } from 'zod';
+
+type Organization = Database['public']['Tables']['organizations']['Row'];
+type OrgMember = Database['public']['Tables']['org_members']['Row'];
 
 const SignupSchema = z.object({
   email: z.string().email(),
@@ -50,7 +54,7 @@ export async function authRoutes(fastify: FastifyInstance) {
         trial_ends_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
       })
       .select()
-      .single();
+      .single() as { data: Organization | null; error: any };
 
     if (orgError || !org) {
       await supabaseAdmin.auth.admin.deleteUser(authData.user.id);

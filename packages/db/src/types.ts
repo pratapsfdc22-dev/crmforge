@@ -333,6 +333,164 @@ export interface Database {
           created_at?: string
         }
       }
+      connection_secrets: {
+        Row: {
+          id: string
+          org_id: string
+          user_id: string | null
+          kind: 'salesforce_jwt' | 'jira_oauth' | 'n8n_api_key'
+          enc_payload: Buffer
+          key_version: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          user_id?: string | null
+          kind: 'salesforce_jwt' | 'jira_oauth' | 'n8n_api_key'
+          enc_payload: Buffer
+          key_version?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          org_id?: string
+          user_id?: string | null
+          kind?: 'salesforce_jwt' | 'jira_oauth' | 'n8n_api_key'
+          enc_payload?: Buffer
+          key_version?: number
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      sf_connections: {
+        Row: {
+          id: string
+          org_id: string
+          label: string
+          env: 'sandbox' | 'production'
+          instance_url: string
+          consumer_key: string
+          sf_username: string
+          status: 'pending' | 'verified' | 'failed' | 'revoked'
+          last_verified_at: string | null
+          failure_reason: string | null
+          created_at: string
+          updated_at: string
+          created_by: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          label: string
+          env: 'sandbox' | 'production'
+          instance_url: string
+          consumer_key: string
+          sf_username: string
+          status?: 'pending' | 'verified' | 'failed' | 'revoked'
+          last_verified_at?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by: string
+        }
+        Update: {
+          id?: string
+          org_id?: string
+          label?: string
+          env?: 'sandbox' | 'production'
+          instance_url?: string
+          consumer_key?: string
+          sf_username?: string
+          status?: 'pending' | 'verified' | 'failed' | 'revoked'
+          last_verified_at?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by?: string
+        }
+      }
+      jira_connections: {
+        Row: {
+          id: string
+          org_id: string
+          user_id: string
+          cloud_id: string
+          site_url: string
+          jira_account_id: string
+          status: 'pending' | 'verified' | 'failed' | 'revoked'
+          last_verified_at: string | null
+          failure_reason: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          user_id: string
+          cloud_id: string
+          site_url: string
+          jira_account_id: string
+          status?: 'pending' | 'verified' | 'failed' | 'revoked'
+          last_verified_at?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          org_id?: string
+          user_id?: string
+          cloud_id?: string
+          site_url?: string
+          jira_account_id?: string
+          status?: 'pending' | 'verified' | 'failed' | 'revoked'
+          last_verified_at?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      n8n_connections: {
+        Row: {
+          id: string
+          org_id: string
+          mode: 'byo' | 'hosted'
+          base_url: string
+          status: 'pending' | 'verified' | 'failed' | 'revoked'
+          last_verified_at: string | null
+          failure_reason: string | null
+          created_at: string
+          updated_at: string
+          created_by: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          mode: 'byo' | 'hosted'
+          base_url: string
+          status?: 'pending' | 'verified' | 'failed' | 'revoked'
+          last_verified_at?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by: string
+        }
+        Update: {
+          id?: string
+          org_id?: string
+          mode?: 'byo' | 'hosted'
+          base_url?: string
+          status?: 'pending' | 'verified' | 'failed' | 'revoked'
+          last_verified_at?: string | null
+          failure_reason?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by?: string
+        }
+      }
     }
     Views: {
       [_ in never]: never

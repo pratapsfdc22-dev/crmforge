@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import { env } from "./config/env.js";
 import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
+import { salesforceConnectionRoutes } from "./routes/connections/salesforce.js";
 
 const fastify = Fastify({
   logger: {
@@ -38,6 +39,7 @@ await fastify.register(cors, {
 
 await fastify.register(healthRoutes);
 await fastify.register(authRoutes);
+await fastify.register(salesforceConnectionRoutes);
 
 const start = async () => {
   try {
