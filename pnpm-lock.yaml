@@ -171,6 +171,10 @@ importers:
         version: 2.1.9(@types/node@22.20.1)
 
   packages/db:
+    dependencies:
+      '@supabase/supabase-js':
+        specifier: ^2.110.8
+        version: 2.110.8
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -181,6 +185,9 @@ importers:
       typescript:
         specifier: ^5.5.4
         version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@22.20.1)
 
   packages/shared:
     dependencies:
