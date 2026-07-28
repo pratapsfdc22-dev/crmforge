@@ -4,16 +4,11 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { Database } from '@forgesf/db/types';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import { supabaseAdmin, verifyToken } from '../../lib/supabase.js';
 import { storeSecret, deleteSecret } from '@forgesf/agent-core';
 import { env } from '../../config/env.js';
-
-type SFConnection = Database['public']['Tables']['sf_connections']['Row'];
-type OrgMember = Database['public']['Tables']['org_members']['Row'];
-type Organization = Database['public']['Tables']['organizations']['Row'];
 
 const CreateSalesforceConnectionSchema = z.object({
   label: z.string().min(1).max(100),
@@ -24,7 +19,6 @@ const CreateSalesforceConnectionSchema = z.object({
   private_key_pem: z.string().min(1)
 });
 
-// Tier limits for Salesforce connections
 const TIER_LIMITS: Record<string, number> = {
   trial: 1,
   starter: 1,
@@ -40,9 +34,6 @@ interface SalesforceTokenResponse {
   issued_at: string;
 }
 
-/**
- * Verify Salesforce connection by executing JWT Bearer token exchange
- */
 async function verifySalesforceConnection(
   instanceUrl: string,
   consumerKey: string,
@@ -50,17 +41,14 @@ async function verifySalesforceConnection(
   privateKeyPem: string
 ): Promise<{ success: boolean; error?: string; accessToken?: string }> {
   try {
-    // Create JWT assertion
     const payload = {
       iss: consumerKey,
       sub: username,
       aud: instanceUrl,
-      exp: Math.floor(Date.now() / 1000) + 300 // 5 minutes
+      exp: Math.floor(Date.now() / 1000) + 300
     };
 
     const assertion = jwt.sign(payload, privateKeyPem, { algorithm: 'RS256' });
-
-    // Exchange JWT for access token
     const tokenUrl = `${instanceUrl}/services/oauth2/token`;
     const params = new URLSearchParams({
       grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
@@ -69,40 +57,25 @@ async function verifySalesforceConnection(
 
     const tokenResponse = await fetch(tokenUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString()
     });
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
-      return {
-        success: false,
-        error: `Token exchange failed: ${errorText}`
-      };
+      return { success: false, error: `Token exchange failed: ${errorText}` };
     }
 
     const tokenData = await tokenResponse.json() as SalesforceTokenResponse;
-
-    // Verify connection by calling Salesforce API
     const apiResponse = await fetch(`${tokenData.instance_url}/services/data`, {
-      headers: {
-        'Authorization': `Bearer ${tokenData.access_token}`
-      }
+      headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
     });
 
     if (!apiResponse.ok) {
-      return {
-        success: false,
-        error: 'Failed to verify Salesforce API access'
-      };
+      return { success: false, error: 'Failed to verify Salesforce API access' };
     }
 
-    return {
-      success: true,
-      accessToken: tokenData.access_token
-    };
+    return { success: true, accessToken: tokenData.access_token };
   } catch (error) {
     return {
       success: false,
@@ -114,7 +87,6 @@ async function verifySalesforceConnection(
 export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
   // Create Salesforce connection
   fastify.post('/connections/salesforce', async (request, reply) => {
-    // Authenticate user
     const authHeader = request.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return reply.status(401).send({ error: 'Unauthorized' });
@@ -128,14 +100,14 @@ export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
 
     const body = CreateSalesforceConnectionSchema.parse(request.body);
 
-    // Get user's org and verify they're an admin or owner
-    const { data: membership, error: membershipError } = await supabaseAdmin
+    const membershipResult: any = await supabaseAdmin
       .from('org_members')
       .select('org_id, role')
       .eq('user_id', user.id)
-      .single() as any;
+      .single();
 
-    if (membershipError || !membership) {
+    const membership = membershipResult.data;
+    if (!membership) {
       return reply.status(403).send({ error: 'Not a member of any organization' });
     }
 
@@ -144,33 +116,30 @@ export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
     }
 
     const orgId = membership.org_id;
-
-    // Get org tier for limit checking
-    const { data: org } = await supabaseAdmin
+    const orgResult: any = await supabaseAdmin
       .from('organizations')
       .select('tier')
       .eq('id', orgId)
-      .single() as any;
+      .single();
 
-    const tier = org?.tier || 'trial';
+    const tier = orgResult.data?.tier || 'trial';
 
-    // Check tier limit
-    const { data: existingConnections } = await supabaseAdmin
+    const existingResult: any = await supabaseAdmin
       .from('sf_connections')
       .select('id')
       .eq('org_id', orgId);
 
     const limit = TIER_LIMITS[tier] || 1;
-    if (existingConnections && existingConnections.length >= limit) {
+    const existing = existingResult.data || [];
+    if (existing.length >= limit) {
       return reply.status(403).send({
         error: 'ConnectionLimitReached',
         message: `Your ${tier} plan allows ${limit} Salesforce connection(s). Upgrade to add more.`,
         limit,
-        current: existingConnections.length
+        current: existing.length
       });
     }
 
-    // Verify Salesforce connection
     const verification = await verifySalesforceConnection(
       body.instance_url,
       body.consumer_key,
@@ -179,55 +148,42 @@ export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
     );
 
     if (!verification.success) {
-      return reply.status(400).send({
-        error: 'VerificationFailed',
-        message: verification.error
-      });
+      return reply.status(400).send({ error: 'VerificationFailed', message: verification.error });
     }
 
-    // Store private key in vault
     try {
       await storeSecret(supabaseAdmin, {
         orgId,
-        userId: null, // Org-level secret
+        userId: null,
         kind: 'salesforce_jwt',
-        payload: {
-          private_key_pem: body.private_key_pem
-        },
+        payload: { private_key_pem: body.private_key_pem },
         masterKey: env.MASTER_ENC_KEY
       });
     } catch (error) {
-      return reply.status(500).send({
-        error: 'VaultError',
-        message: 'Failed to store connection secret'
-      });
+      return reply.status(500).send({ error: 'VaultError', message: 'Failed to store connection secret' });
     }
 
-    // Create connection record
-    const { data: connection, error: connectionError } = await supabaseAdmin
+    const connectionResult: any = await supabaseAdmin
       .from('sf_connections')
       .insert({
         org_id: orgId,
         label: body.label,
-        env: body.env,
+        env: body.env as 'sandbox' | 'production',
         instance_url: body.instance_url,
         consumer_key: body.consumer_key,
         sf_username: body.sf_username,
-        status: 'verified',
+        status: 'verified' as const,
         last_verified_at: new Date().toISOString(),
         created_by: user.id
-      } as any)
+      })
       .select()
-      .single() as any;
+      .single();
 
-    if (connectionError) {
-      return reply.status(500).send({
-        error: 'DatabaseError',
-        message: connectionError.message
-      });
+    const connection = connectionResult.data;
+    if (!connection) {
+      return reply.status(500).send({ error: 'DatabaseError', message: 'Failed to create connection' });
     }
 
-    // Audit log
     await supabaseAdmin.from('audit_events').insert({
       org_id: orgId,
       actor_user_id: user.id,
@@ -235,12 +191,8 @@ export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
       target_type: 'sf_connection',
       target_id: connection.id,
       payload_hash: 'redacted',
-      metadata: {
-        label: body.label,
-        env: body.env,
-        sf_username: body.sf_username
-      }
-    });
+      metadata: { label: body.label, env: body.env, sf_username: body.sf_username }
+    } as any);
 
     return reply.status(201).send({
       connection: {
@@ -256,7 +208,7 @@ export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // List Salesforce connections
+  // List connections
   fastify.get('/connections/salesforce', async (request, reply) => {
     const authHeader = request.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -269,32 +221,26 @@ export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
       return reply.status(401).send({ error: 'Invalid token' });
     }
 
-    // Get user's orgs
-    const { data: memberships } = await supabaseAdmin
+    const membershipsResult: any = await supabaseAdmin
       .from('org_members')
       .select('org_id')
-      .eq('user_id', user.id) as any;
+      .eq('user_id', user.id);
 
-    if (!memberships || memberships.length === 0) {
+    const memberships = membershipsResult.data || [];
+    if (memberships.length === 0) {
       return reply.send({ connections: [] });
     }
 
-    const orgIds = memberships.map(m => m.org_id);
-
-    // Get connections (RLS will filter to user's orgs, but we use admin client for consistency)
-    const { data: connections, error } = await supabaseAdmin
+    const orgIds = memberships.map((m: any) => m.org_id);
+    const connectionsResult: any = await supabaseAdmin
       .from('sf_connections')
       .select('*')
       .in('org_id', orgIds)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      return reply.status(500).send({ error: error.message });
-    }
-
-    // Never return private keys or consumer secrets
+    const connections = connectionsResult.data || [];
     return reply.send({
-      connections: connections.map(c => ({
+      connections: connections.map((c: any) => ({
         id: c.id,
         label: c.label,
         env: c.env,
@@ -309,7 +255,7 @@ export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // Delete Salesforce connection
+  // Delete connection
   fastify.delete('/connections/salesforce/:id', async (request, reply) => {
     const authHeader = request.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -323,48 +269,36 @@ export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
     }
 
     const { id } = request.params as { id: string };
-
-    // Get connection to verify ownership
-    const { data: connection, error: fetchError } = await supabaseAdmin
+    const connectionResult: any = await supabaseAdmin
       .from('sf_connections')
       .select('org_id')
       .eq('id', id)
-      .single() as any;
+      .single();
 
-    if (fetchError || !connection) {
+    const connection = connectionResult.data;
+    if (!connection) {
       return reply.status(404).send({ error: 'Connection not found' });
     }
 
-    // Verify user is admin/owner
-    const { data: membership } = await supabaseAdmin
+    const membershipResult: any = await supabaseAdmin
       .from('org_members')
       .select('role')
       .eq('org_id', connection.org_id)
       .eq('user_id', user.id)
-      .single() as any;
+      .single();
 
+    const membership = membershipResult.data;
     if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
       return reply.status(403).send({ error: 'Only owners and admins can delete connections' });
     }
 
-    // Delete secret from vault
     await deleteSecret(supabaseAdmin, {
       orgId: connection.org_id,
       userId: null,
       kind: 'salesforce_jwt'
     });
 
-    // Delete connection
-    const { error: deleteError } = await supabaseAdmin
-      .from('sf_connections')
-      .delete()
-      .eq('id', id);
-
-    if (deleteError) {
-      return reply.status(500).send({ error: deleteError.message });
-    }
-
-    // Audit log
+    await supabaseAdmin.from('sf_connections').delete().eq('id', id);
     await supabaseAdmin.from('audit_events').insert({
       org_id: connection.org_id,
       actor_user_id: user.id,
@@ -373,102 +307,8 @@ export async function salesforceConnectionRoutes(fastify: FastifyInstance) {
       target_id: id,
       payload_hash: 'redacted',
       metadata: {}
-    });
+    } as any);
 
     return reply.status(204).send();
-  });
-
-  // Re-verify Salesforce connection
-  fastify.post('/connections/salesforce/:id/verify', async (request, reply) => {
-    const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return reply.status(401).send({ error: 'Unauthorized' });
-    }
-
-    const token = authHeader.substring(7);
-    const user = await verifyToken(token);
-    if (!user) {
-      return reply.status(401).send({ error: 'Invalid token' });
-    }
-
-    const { id } = request.params as { id: string };
-
-    // Get connection
-    const { data: connection, error: fetchError } = await supabaseAdmin
-      .from('sf_connections')
-      .select('*')
-      .eq('id', id)
-      .single() as any;
-
-    if (fetchError || !connection) {
-      return reply.status(404).send({ error: 'Connection not found' });
-    }
-
-    // Verify user has access
-    const { data: membership } = await supabaseAdmin
-      .from('org_members')
-      .select('role')
-      .eq('org_id', connection.org_id)
-      .eq('user_id', user.id)
-      .single() as any;
-
-    if (!membership) {
-      return reply.status(403).send({ error: 'Access denied' });
-    }
-
-    // Load private key from vault
-    const { loadSecret } = await import('@forgesf/agent-core');
-    const secret = await loadSecret<{ private_key_pem: string }>(supabaseAdmin, {
-      orgId: connection.org_id,
-      userId: null,
-      kind: 'salesforce_jwt',
-      masterKey: env.MASTER_ENC_KEY
-    });
-
-    if (!secret) {
-      return reply.status(500).send({ error: 'Private key not found in vault' });
-    }
-
-    // Re-verify connection
-    const verification = await verifySalesforceConnection(
-      connection.instance_url,
-      connection.consumer_key,
-      connection.sf_username,
-      secret.private_key_pem
-    );
-
-    // Update connection status
-    const { error: updateError } = await supabaseAdmin
-      .from('sf_connections')
-      .update({
-        status: verification.success ? 'verified' : 'failed',
-        last_verified_at: new Date().toISOString(),
-        failure_reason: verification.success ? null : verification.error
-      } as any)
-      .eq('id', id);
-
-    if (updateError) {
-      return reply.status(500).send({ error: updateError.message });
-    }
-
-    // Audit log
-    await supabaseAdmin.from('audit_events').insert({
-      org_id: connection.org_id,
-      actor_user_id: user.id,
-      action: 'salesforce_connection.verified',
-      target_type: 'sf_connection',
-      target_id: id,
-      payload_hash: 'redacted',
-      metadata: {
-        success: verification.success,
-        error: verification.error
-      }
-    });
-
-    return reply.send({
-      success: verification.success,
-      status: verification.success ? 'verified' : 'failed',
-      error: verification.error
-    });
   });
 }

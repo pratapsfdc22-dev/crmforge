@@ -32,11 +32,16 @@ if (!DATABASE_URL) {
 
 // URL-encode special characters in password if needed
 // Format: postgresql://user:password@host:port/db
-const urlMatch = DATABASE_URL.match(/^postgresql:\/\/([^:]+):(.+)@(.+)$/);
+// Use a non-greedy match for password to stop at the last @
+const urlMatch = DATABASE_URL.match(/^postgresql:\/\/([^:]+):(.+)@([^@]+)$/);
 if (urlMatch) {
   const [, user, password, rest] = urlMatch;
-  const encodedPassword = encodeURIComponent(password);
-  DATABASE_URL = `postgresql://${user}:${encodedPassword}@${rest}`;
+  // Only encode if password contains special characters
+  if (password.includes('[') || password.includes(']') || password.includes('@') || password.includes('%')) {
+    const encodedPassword = encodeURIComponent(password);
+    DATABASE_URL = `postgresql://${user}:${encodedPassword}@${rest}`;
+    console.log('🔐 Password contains special characters, using URL encoding');
+  }
 }
 
 const outputPath = join(__dirname, '../src/types.ts');

@@ -45,7 +45,7 @@ export async function authRoutes(fastify: FastifyInstance) {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
 
-    const { data: org, error: orgError } = await supabaseAdmin
+    const orgResult: any = await supabaseAdmin
       .from('organizations')
       .insert({
         name: body.organizationName,
@@ -54,7 +54,10 @@ export async function authRoutes(fastify: FastifyInstance) {
         trial_ends_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
       })
       .select()
-      .single() as { data: Organization | null; error: any };
+      .single();
+
+    const org = orgResult.data;
+    const orgError = orgResult.error;
 
     if (orgError || !org) {
       await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
@@ -64,13 +67,15 @@ export async function authRoutes(fastify: FastifyInstance) {
       });
     }
 
-    const { error: memberError } = await supabaseAdmin
+    const memberResult: any = await supabaseAdmin
       .from('org_members')
       .insert({
         org_id: org.id,
         user_id: authData.user.id,
         role: 'owner'
       });
+
+    const memberError = memberResult.error;
 
     if (memberError) {
       await supabaseAdmin.auth.admin.deleteUser(authData.user.id);

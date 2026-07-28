@@ -54,6 +54,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       org_members: {
         Row: {
@@ -80,6 +81,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       invitations: {
         Row: {
@@ -115,6 +117,7 @@ export interface Database {
           invited_by?: string | null
           created_at?: string
         }
+        Relationships: []
       }
       salesforce_connections: {
         Row: {
@@ -165,6 +168,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       ai_tasks: {
         Row: {
@@ -224,6 +228,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       task_artifacts: {
         Row: {
@@ -259,6 +264,7 @@ export interface Database {
           size_bytes?: number | null
           created_at?: string
         }
+        Relationships: []
       }
       usage_records: {
         Row: {
@@ -297,6 +303,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       audit_events: {
         Row: {
@@ -332,6 +339,7 @@ export interface Database {
           metadata?: Json
           created_at?: string
         }
+        Relationships: []
       }
       connection_secrets: {
         Row: {
@@ -364,6 +372,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       sf_connections: {
         Row: {
@@ -411,6 +420,7 @@ export interface Database {
           updated_at?: string
           created_by?: string
         }
+        Relationships: []
       }
       jira_connections: {
         Row: {
@@ -452,6 +462,7 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
+        Relationships: []
       }
       n8n_connections: {
         Row: {
@@ -490,6 +501,7 @@ export interface Database {
           updated_at?: string
           created_by?: string
         }
+        Relationships: []
       }
     }
     Views: {
