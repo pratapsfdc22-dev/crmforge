@@ -4,6 +4,8 @@ import { env } from "./config/env.js";
 import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
 import { salesforceConnectionRoutes } from "./routes/connections/salesforce.js";
+import { jiraConnectionRoutes } from "./routes/connections/jira.js";
+import { n8nConnectionRoutes } from "./routes/connections/n8n.js";
 
 const fastify = Fastify({
   logger: {
@@ -40,6 +42,8 @@ await fastify.register(cors, {
 await fastify.register(healthRoutes);
 await fastify.register(authRoutes);
 await fastify.register(salesforceConnectionRoutes);
+await fastify.register(jiraConnectionRoutes);
+await fastify.register(n8nConnectionRoutes);
 
 const start = async () => {
   try {

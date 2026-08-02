@@ -13,6 +13,12 @@ const envSchema = z.object({
   DATABASE_URL: z.string(),
   MASTER_ENC_KEY: z.string(),
 
+  API_URL: z.string().url(),
+  WEB_URL: z.string().url(),
+
+  ATLASSIAN_CLIENT_ID: z.string().optional(),
+  ATLASSIAN_CLIENT_SECRET: z.string().optional(),
+
   AWS_ACCESS_KEY_ID: z.string(),
   AWS_SECRET_ACCESS_KEY: z.string(),
   AWS_REGION: z.string().default("us-east-1"),
