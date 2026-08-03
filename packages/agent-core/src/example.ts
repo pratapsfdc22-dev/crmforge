@@ -48,7 +48,9 @@ Use the provided tools to fetch and update data.`;
 
   // 5. Process response
   console.log('Agent response:', response.content);
-  console.log('Tokens used:', response.usage?.inputTokens + response.usage?.outputTokens);
+  if (response.usage) {
+    console.log('Tokens used:', response.usage.inputTokens + response.usage.outputTokens);
+  }
 
   return response.content;
 }
