@@ -11,6 +11,7 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string(),
   SUPABASE_JWT_SECRET: z.string(),
   DATABASE_URL: z.string(),
+  PGBOSS_DATABASE_URL: z.string().optional(),
   MASTER_ENC_KEY: z.string(),
 
   API_URL: z.string().url(),

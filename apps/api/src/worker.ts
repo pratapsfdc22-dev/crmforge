@@ -39,9 +39,23 @@ async function startWorker() {
   );
 
   // Register handler for orchestrate-task jobs
-  await queue.work('orchestrate-task', async (job: any) => {
+  console.log('[Worker] Registering work handler for orchestrate-task...');
+
+  // Error handler - catch all errors
+  queue.on('error', (err) => {
+    console.error('[Worker Queue Error]:', err);
+  });
+
+  // Failed job handler
+  queue.on('failed', (jobId, err) => {
+    console.error(`[Worker Failed Job] ${jobId}:`, err);
+  });
+
+  // Work handler
+  const workPromise = queue.work('orchestrate-task', async (job: any) => {
+    console.log('[Worker Handler] *** HANDLER INVOKED ***');
     const taskData: TaskJob = job.data;
-    console.log(`[Worker] Processing task ${taskData.taskId} for org ${taskData.orgId}`);
+    console.log(`[Worker] ✓ JOB RECEIVED: Processing task ${taskData.taskId} for org ${taskData.orgId}`);
 
     try {
       // Update state: queued -> planning
@@ -129,7 +143,9 @@ async function startWorker() {
     }
   });
 
-  console.log('[Worker] Listening for orchestrate-task jobs...');
+  console.log('[Worker] Waiting for work handler to be ready...');
+  // The work() promise doesn't resolve until the worker shuts down, so we don't await it
+  console.log('[Worker] ✓ Listening for orchestrate-task jobs...');
 }
 
 startWorker().catch((err) => {

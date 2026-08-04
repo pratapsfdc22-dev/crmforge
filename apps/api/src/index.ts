@@ -50,13 +50,20 @@ await fastify.register(taskRoutes);
 
 const start = async () => {
   try {
-    // Initialize queue
+    console.log('[Main] Starting API server...');
+    console.log('[Main] Initializing queue...');
     await initQueue();
+    console.log('[Main] Queue initialized successfully');
 
     const port = parseInt(env.PORT, 10);
+    console.log(`[Main] Starting Fastify on port ${port}...`);
     await fastify.listen({ port, host: "0.0.0.0" });
+    console.log(`[Main] ✓ Server listening on port ${port}`);
   } catch (err) {
-    fastify.log.error(err);
+    console.error('[Main] ✗ Startup failed:', err instanceof Error ? err.message : err);
+    if (err instanceof Error) {
+      console.error('[Main] Stack:', err.stack);
+    }
     process.exit(1);
   }
 };

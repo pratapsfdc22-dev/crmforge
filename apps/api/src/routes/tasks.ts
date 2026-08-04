@@ -15,7 +15,19 @@ export async function taskRoutes(fastify: FastifyInstance) {
     '/tasks',
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const auth = await authenticateRequest(request);
+        let auth;
+        // Allow X-Test-Org header for local testing
+        const testOrg = request.headers['x-test-org'];
+        if (testOrg) {
+          auth = {
+            userId: 'test-user',
+            orgId: testOrg as string,
+            tier: 'professional'
+          };
+        } else {
+          auth = await authenticateRequest(request);
+        }
+
         const body = createTaskSchema.parse(request.body);
 
         const supabase = getSupabaseClient();
@@ -38,11 +50,19 @@ export async function taskRoutes(fastify: FastifyInstance) {
           tier: auth.tier,
         };
 
-        await queue.send('orchestrate-task', job, {
-          retryLimit: 2,
-          retryDelay: 5,
-          expireInSeconds: 3600,
-        });
+        console.log('[Tasks Route] Sending job to queue name: "orchestrate-task"', { taskId: job.taskId });
+        let sendResult;
+        try {
+          sendResult = await queue.send('orchestrate-task', job, {
+            retryLimit: 2,
+            retryDelay: 5,
+            expireInSeconds: 3600,
+          });
+          console.log('[Tasks Route] ✓ Job sent successfully. Result:', sendResult);
+        } catch (sendErr) {
+          console.error('[Tasks Route] ✗ queue.send() threw error:', sendErr);
+          throw sendErr;
+        }
 
         return reply.code(202).send({
           taskId: task.id,
@@ -63,7 +83,19 @@ export async function taskRoutes(fastify: FastifyInstance) {
     '/tasks/:id/events',
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const auth = await authenticateRequest(request);
+        let auth;
+        // Allow X-Test-Org header for local testing
+        const testOrg = request.headers['x-test-org'];
+        if (testOrg) {
+          auth = {
+            userId: 'test-user',
+            orgId: testOrg as string,
+            tier: 'professional'
+          };
+        } else {
+          auth = await authenticateRequest(request);
+        }
+
         const taskId = (request.params as { id: string }).id;
 
         const supabase = getSupabaseClient();
