@@ -18,36 +18,43 @@ import type { BedrockClient } from './bedrock-client.js';
 const mockTenantContext: TenantContext = {
   orgId: 'org-123',
   userId: 'user-456',
-  getSecret: vi.fn(async (kind: string) => {
-    if (kind === 'jira_oauth') {
-      return { access_token: 'mock-jira-token', site_url: 'https://mock.atlassian.net' };
-    }
-    if (kind === 'salesforce_jwt') {
-      return { access_token: 'mock-sf-token', instance_url: 'https://mock.salesforce.com' };
-    }
-    if (kind === 'n8n_api_key') {
-      return { api_key: 'mock-n8n-key', base_url: 'https://mock-n8n.example.com' };
-    }
-    return null;
-  })
+  tier: 'professional',
+  sfConnection: {
+    instanceUrl: 'https://mock.salesforce.com',
+    accessToken: 'mock-sf-token',
+    expiresAt: Date.now() + 3600000
+  },
+  jiraToken: {
+    api_token: 'mock-jira-token',
+    email: 'user@example.com',
+    jira_url: 'https://mock.atlassian.net'
+  },
+  n8nConnection: {
+    api_key: 'mock-n8n-key',
+    base_url: 'https://mock-n8n.example.com'
+  }
 };
 
-const mockBedrockClient: BedrockClient = {
+const mockBedrockClient = {
   invoke: vi.fn(async (params) => {
     // Return a valid plan for normal cases
-    return JSON.stringify({
-      steps: [
-        {
-          tool: 'queryJira',
-          input: { jql: 'assignee = currentUser()' },
-          rationale: 'Find assigned issues'
-        }
-      ],
-      risk: 'read_only',
-      summary: 'Query assigned Jira issues'
-    });
+    return {
+      content: JSON.stringify({
+        steps: [
+          {
+            tool: 'queryJira',
+            input: { jql: 'assignee = currentUser()' },
+            rationale: 'Find assigned issues'
+          }
+        ],
+        risk: 'read_only',
+        summary: 'Query assigned Jira issues'
+      }),
+      stopReason: 'end_turn',
+      usage: { inputTokens: 100, outputTokens: 50 }
+    };
   })
-};
+} as any;
 
 describe('Orchestrator', () => {
   let orchestrator: Orchestrator;
@@ -86,13 +93,14 @@ describe('Orchestrator', () => {
         rationale: 'test'
       });
 
-      (mockBedrockClient.invoke as any).mockResolvedValueOnce(
-        JSON.stringify({
+      (mockBedrockClient.invoke as any).mockResolvedValueOnce({
+        content: JSON.stringify({
           steps: tooManySteps,
           risk: 'read_only',
           summary: 'test'
-        })
-      );
+        }),
+        stopReason: 'end_turn'
+      });
 
       // Should fail validation
       await expect(orchestrator.plan('Test')).rejects.toThrow();
@@ -101,9 +109,12 @@ describe('Orchestrator', () => {
     it('should trigger repair on invalid JSON', async () => {
       // First call returns invalid JSON, second returns valid
       (mockBedrockClient.invoke as any)
-        .mockResolvedValueOnce('Not JSON {{{ invalid') // Invalid JSON
-        .mockResolvedValueOnce(
-          JSON.stringify({
+        .mockResolvedValueOnce({
+          content: 'Not JSON {{{ invalid',
+          stopReason: 'end_turn'
+        })
+        .mockResolvedValueOnce({
+          content: JSON.stringify({
             steps: [
               {
                 tool: 'queryJira',
@@ -113,8 +124,9 @@ describe('Orchestrator', () => {
             ],
             risk: 'read_only',
             summary: 'Repaired plan'
-          })
-        );
+          }),
+          stopReason: 'end_turn'
+        });
 
       // Should retry and succeed
       const { plan, repaired } = await orchestrator.plan('Test');
@@ -127,8 +139,14 @@ describe('Orchestrator', () => {
     it('should fail if repair also fails', async () => {
       // Both calls return invalid JSON
       (mockBedrockClient.invoke as any)
-        .mockResolvedValueOnce('Invalid JSON 1')
-        .mockResolvedValueOnce('Invalid JSON 2');
+        .mockResolvedValueOnce({
+          content: 'Invalid JSON 1',
+          stopReason: 'end_turn'
+        })
+        .mockResolvedValueOnce({
+          content: 'Invalid JSON 2',
+          stopReason: 'end_turn'
+        });
 
       await expect(orchestrator.plan('Test')).rejects.toThrow('Failed to generate valid plan after repair');
     });
@@ -217,14 +235,15 @@ describe('Orchestrator', () => {
   describe('Verification', () => {
     it('should verify task completion', async () => {
       // Create a fresh mock for this test
-      const verifyClient: BedrockClient = {
-        invoke: vi.fn(async () =>
-          JSON.stringify({
+      const verifyClient = {
+        invoke: vi.fn(async () => ({
+          content: JSON.stringify({
             verified: true,
             summary: 'Successfully found 5 Jira issues'
-          })
-        )
-      };
+          }),
+          stopReason: 'end_turn'
+        }))
+      } as any;
 
       const verifyOrchestrator = new Orchestrator(mockTenantContext, verifyClient);
 
@@ -247,7 +266,10 @@ describe('Orchestrator', () => {
     });
 
     it('should handle verification failure gracefully', async () => {
-      (mockBedrockClient.invoke as any).mockResolvedValueOnce('Invalid JSON');
+      (mockBedrockClient.invoke as any).mockResolvedValueOnce({
+        content: 'Invalid JSON',
+        stopReason: 'end_turn'
+      });
 
       const { verified, summary } = await orchestrator.verify('Test', []);
 
@@ -258,6 +280,23 @@ describe('Orchestrator', () => {
 
   describe('State Machine', () => {
     it('should execute planning and execution sequentially', async () => {
+      // Reset and set up fresh mock for this test
+      vi.clearAllMocks();
+      (mockBedrockClient.invoke as any).mockResolvedValueOnce({
+        content: JSON.stringify({
+          steps: [
+            {
+              tool: 'queryJira',
+              input: { jql: 'assignee = currentUser()' },
+              rationale: 'Find assigned issues'
+            }
+          ],
+          risk: 'read_only',
+          summary: 'Query assigned Jira issues'
+        }),
+        stopReason: 'end_turn'
+      });
+
       // Planning
       const { plan } = await orchestrator.plan('Test intent');
       expect(plan.risk).toBe('read_only');
@@ -273,8 +312,8 @@ describe('Orchestrator', () => {
     });
 
     it('should identify prod_write risk requiring approval', async () => {
-      (mockBedrockClient.invoke as any).mockResolvedValueOnce(
-        JSON.stringify({
+      (mockBedrockClient.invoke as any).mockResolvedValueOnce({
+        content: JSON.stringify({
           steps: [
             {
               tool: 'triggerN8nWorkflow',
@@ -284,8 +323,9 @@ describe('Orchestrator', () => {
           ],
           risk: 'prod_write',
           summary: 'Update Salesforce in production'
-        })
-      );
+        }),
+        stopReason: 'end_turn'
+      });
 
       const { plan } = await orchestrator.plan('Update SFDC records');
 

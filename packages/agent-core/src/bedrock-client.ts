@@ -8,6 +8,7 @@ import type { Tier } from './tenant-context';
 
 export interface BedrockInvokeParams {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  system?: string;
   maxTokens?: number;
   temperature?: number;
   topP?: number;
@@ -27,9 +28,15 @@ interface ConverseRequestMessage {
   content: Array<{ type: 'text'; text: string }>;
 }
 
+interface SystemContentBlock {
+  type: 'text';
+  text: string;
+}
+
 interface ConverseRequest {
   modelId: string;
   messages: ConverseRequestMessage[];
+  system?: SystemContentBlock[];
   inferenceConfig?: {
     maxTokens?: number;
     temperature?: number;
@@ -81,6 +88,7 @@ export class BedrockClient {
         role: msg.role,
         content: [{ type: 'text', text: msg.content }]
       })),
+      ...(params.system && { system: [{ type: 'text', text: params.system }] }),
       inferenceConfig: {
         maxTokens: params.maxTokens ?? 1024,
         temperature: params.temperature ?? 0.7,

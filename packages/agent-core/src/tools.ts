@@ -32,25 +32,13 @@ export type SalesforceQueryInput = z.infer<typeof SalesforceQuerySchema>;
 export type N8nTriggerInput = z.infer<typeof N8nTriggerSchema>;
 
 /**
- * Tool execution context - includes validated input + injected credentials
- */
-export interface ToolExecutionContext<T> {
-  input: T;
-  credentials: {
-    jira?: { accessToken: string; site_url: string };
-    salesforce?: { access_token: string; instance_url: string };
-    n8n?: { api_key: string; base_url: string };
-  };
-}
-
-/**
  * Tool result type
  */
 export interface ToolResult<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
-  redactedInput: string; // For logging, with credentials stripped
+  redactedInput: string;
 }
 
 /**
@@ -65,8 +53,7 @@ export async function queryJira(
     const validated = JiraQuerySchema.parse(input);
 
     // Get Jira credentials from context
-    const jiraSecret = await ctx.getSecret('jira_oauth');
-    if (!jiraSecret) {
+    if (!ctx.jiraToken) {
       return {
         success: false,
         error: 'No Jira credentials configured',
@@ -105,12 +92,11 @@ export async function querySalesforce(
     // Validate input
     const validated = SalesforceQuerySchema.parse(input);
 
-    // Get Salesforce credentials from context
-    const sfSecret = await ctx.getSecret('salesforce_jwt');
-    if (!sfSecret) {
+    // Salesforce connection is always present
+    if (!ctx.sfConnection) {
       return {
         success: false,
-        error: 'No Salesforce credentials configured',
+        error: 'Salesforce not configured',
         redactedInput: `SalesforceQuery(soql="${validated.soql}")`
       };
     }
@@ -146,8 +132,7 @@ export async function triggerN8nWorkflow(
     const validated = N8nTriggerSchema.parse(input);
 
     // Get n8n credentials from context
-    const n8nSecret = await ctx.getSecret('n8n_api_key');
-    if (!n8nSecret) {
+    if (!ctx.n8nConnection) {
       return {
         success: false,
         error: 'No n8n credentials configured',

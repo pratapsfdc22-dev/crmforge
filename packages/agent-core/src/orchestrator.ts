@@ -119,14 +119,16 @@ Never include credentials in inputs. Inputs are validated and credentials inject
     try {
       // Call Bedrock to plan
       const response = await this.bedrockClient.invoke({
-        systemPrompt,
-        userMessage: `Intent: ${intent}`,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: `Intent: ${intent}` }
+        ],
         temperature: 0.7,
         maxTokens: 2000
       });
 
       // Parse and validate response
-      const parsed = JSON.parse(response);
+      const parsed = JSON.parse(response.content);
       const plan = PlanSchema.parse(parsed);
 
       return { plan, repaired: false };
@@ -135,15 +137,15 @@ Never include credentials in inputs. Inputs are validated and credentials inject
       if (error instanceof Error && error.message.includes('JSON')) {
         try {
           const response = await this.bedrockClient.invoke({
-            systemPrompt,
-            userMessage: `Intent: ${intent}
-
-Please respond ONLY with a valid JSON object, no markdown or other text.`,
+            system: systemPrompt,
+            messages: [
+              { role: 'user', content: `Intent: ${intent}\n\nPlease respond ONLY with a valid JSON object, no markdown or other text.` }
+            ],
             temperature: 0.7,
             maxTokens: 2000
           });
 
-          const parsed = JSON.parse(response);
+          const parsed = JSON.parse(response.content);
           const plan = PlanSchema.parse(parsed);
 
           return { plan, repaired: true };
@@ -199,9 +201,9 @@ Please respond ONLY with a valid JSON object, no markdown or other text.`,
         throw new Error(`Unknown tool: ${step.tool}`);
       }
 
-      // Execute tool
+      // Execute tool - step.input is pre-validated by orchestrator.plan()
       const toolFn = TOOL_REGISTRY[step.tool as ToolName];
-      const result = await toolFn(this.ctx, step.input);
+      const result = await toolFn(this.ctx, step.input as any);
 
       if (!result.success) {
         record.status = 'failed';
@@ -232,18 +234,15 @@ Return JSON: {verified: boolean, summary: string}`;
       const stepsText = steps.map(s => `${s.tool_name}: ${s.output_summary}`).join('\n');
 
       const response = await this.bedrockClient.invoke({
-        systemPrompt,
-        userMessage: `Intent: ${intent}
-
-Completed steps:
-${stepsText}
-
-Was this intent fulfilled? Return only JSON.`,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: `Intent: ${intent}\n\nCompleted steps:\n${stepsText}\n\nWas this intent fulfilled? Return only JSON.` }
+        ],
         temperature: 0.5,
         maxTokens: 500
       });
 
-      const parsed = JSON.parse(response);
+      const parsed = JSON.parse(response.content);
       return {
         verified: Boolean(parsed.verified),
         summary: parsed.summary || 'Verification complete'
