@@ -458,7 +458,7 @@ describe('Orchestrator', () => {
       ).resolves.toBeUndefined();
     });
 
-    it('should record task completion with observability when available', async () => {
+    it('should record task completion with Langfuse only (Pinecone currently disabled to prevent fake embeddings)', async () => {
       const mockLangfuse = {
         startTrace: vi.fn(() => 'trace-123'),
         logGeneration: vi.fn(async () => {}),
@@ -467,7 +467,7 @@ describe('Orchestrator', () => {
       } as any;
 
       const mockPinecone = {
-        embedText: vi.fn(async (text: string) => Array(1536).fill(Math.random())),
+        embedText: vi.fn(async (text: string) => Array(1024).fill(Math.random())),
         querySimilarTasks: vi.fn(async () => []),
         upsertTaskEmbedding: vi.fn(async () => {})
       } as any;
@@ -487,6 +487,7 @@ describe('Orchestrator', () => {
         'Found 5 issues'
       );
 
+      // Langfuse logging should work
       expect(mockLangfuse.logSpan).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'task_completion',
@@ -494,16 +495,10 @@ describe('Orchestrator', () => {
         })
       );
 
-      expect(mockPinecone.embedText).toHaveBeenCalled();
-      expect(mockPinecone.upsertTaskEmbedding).toHaveBeenCalledWith(
-        'task-123',
-        expect.any(Array),
-        expect.objectContaining({
-          title: 'Query Issues',
-          outcome: 'Found 5 issues'
-        }),
-        'org-123'
-      );
+      // Pinecone currently skipped to prevent writing mock embeddings to real indexes
+      // This test confirms Pinecone is NOT called (no fake vectors in production data)
+      expect(mockPinecone.embedText).not.toHaveBeenCalled();
+      expect(mockPinecone.upsertTaskEmbedding).not.toHaveBeenCalled();
     });
   });
 });

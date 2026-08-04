@@ -275,6 +275,9 @@ Return JSON: {verified: boolean, summary: string}`;
 
   /**
    * Record task completion with observability (gracefully degraded if unavailable)
+   * Note: Pinecone memory integration requires live embeddings from Bedrock Titan.
+   * Currently skipped to avoid writing mock vectors to real indexes.
+   * Future: integrate live Bedrock calls only, never write fake embeddings.
    */
   async recordCompletion(
     taskId: string,
@@ -294,25 +297,8 @@ Return JSON: {verified: boolean, summary: string}`;
       });
     }
 
-    // Upsert to Pinecone if available
-    if (this.pinecone) {
-      try {
-        const embedding = await this.pinecone.embedText(`${title} ${description} ${planSummary}`);
-        await this.pinecone.upsertTaskEmbedding(
-          taskId,
-          embedding,
-          {
-            title,
-            description,
-            planSummary,
-            outcome,
-            timestamp: Date.now()
-          },
-          this.ctx.orgId
-        );
-      } catch (error) {
-        // Graceful degradation
-      }
-    }
+    // Pinecone memory currently disabled to prevent writing mock embeddings to production indexes.
+    // When live Bedrock Titan integration is added: only upsert if embeddings are real, never mock vectors.
+    // if (this.pinecone) { ... }
   }
 }

@@ -37,22 +37,40 @@ export class PineconeClient {
 
   /**
    * Embed text using Bedrock Titan embeddings
+   * In tests: uses mock embeddings for speed and no AWS credentials required
+   * For live calls: use callBedrockTitan() directly (see scripts/smoke-test-titan.ts)
    */
   async embedText(text: string): Promise<number[]> {
-    try {
-      // In production: call Bedrock Titan embeddings API
-      // Using BedrockRuntimeClient().invoke({
-      //   modelId: 'amazon.titan-embed-text-v2:0',
-      //   body: JSON.stringify({ inputText: text })
-      // })
+    // Mock embeddings for fast, credential-free operation
+    // Consistent hash-based generation for deterministic test results
+    const hash = this.hashText(text);
+    return Array(1024).fill(0).map((_, i) => Math.sin(hash + i) * 0.5 + 0.5);
+  }
 
-      // For testing: return mock embedding (1536-dim like Titan)
-      const hash = this.hashText(text);
-      return Array(1536).fill(0).map((_, i) => Math.sin(hash + i) * 0.5 + 0.5);
-    } catch (error) {
-      console.error('[Pinecone] Embedding failed (non-blocking):', error);
-      throw error;
+  /**
+   * Call Bedrock Titan embeddings API
+   */
+  private async callBedrockTitan(text: string): Promise<number[]> {
+    // Dynamic import to avoid requiring SDK at module load time
+    const { BedrockRuntimeClient, InvokeModelCommand } = await import('@aws-sdk/client-bedrock-runtime');
+
+    const client = new BedrockRuntimeClient({ region: 'us-west-2' });
+
+    const command = new InvokeModelCommand({
+      modelId: 'amazon.titan-embed-text-v2:0',
+      body: JSON.stringify({ inputText: text }),
+      contentType: 'application/json',
+      accept: 'application/json'
+    });
+
+    const response = await client.send(command);
+    const body = JSON.parse(new TextDecoder().decode(response.body));
+
+    if (!body.embedding || !Array.isArray(body.embedding)) {
+      throw new Error('Invalid Bedrock Titan response: missing embedding array');
     }
+
+    return body.embedding;
   }
 
   /**
