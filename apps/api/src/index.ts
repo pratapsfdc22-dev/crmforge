@@ -6,6 +6,8 @@ import { authRoutes } from "./routes/auth.js";
 import { salesforceConnectionRoutes } from "./routes/connections/salesforce.js";
 import { jiraConnectionRoutes } from "./routes/connections/jira.js";
 import { n8nConnectionRoutes } from "./routes/connections/n8n.js";
+import { taskRoutes } from "./routes/tasks.js";
+import { initQueue } from "./lib/queue.js";
 
 const fastify = Fastify({
   logger: {
@@ -44,9 +46,13 @@ await fastify.register(authRoutes);
 await fastify.register(salesforceConnectionRoutes);
 await fastify.register(jiraConnectionRoutes);
 await fastify.register(n8nConnectionRoutes);
+await fastify.register(taskRoutes);
 
 const start = async () => {
   try {
+    // Initialize queue
+    await initQueue();
+
     const port = parseInt(env.PORT, 10);
     await fastify.listen({ port, host: "0.0.0.0" });
   } catch (err) {

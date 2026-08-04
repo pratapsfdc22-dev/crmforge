@@ -28,6 +28,8 @@ const envSchema = z.object({
   LANGFUSE_HOST: z.string().url().optional(),
 
   PINECONE_API_KEY: z.string(),
+  PINECONE_ENVIRONMENT: z.string().default('us-west-1'),
+  PINECONE_PROJECT_ID: z.string(),
 
   STRIPE_SECRET_KEY: z.string(),
   STRIPE_WEBHOOK_SECRET: z.string(),

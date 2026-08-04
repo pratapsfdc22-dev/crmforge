@@ -38,6 +38,11 @@ export function createUserClient(accessToken: string) {
   );
 }
 
+// Get service role client
+export function getSupabaseClient() {
+  return supabaseAdmin;
+}
+
 // Verify JWT and extract user
 export async function verifyToken(token: string) {
   const { data, error } = await supabaseAdmin.auth.getUser(token);

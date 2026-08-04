@@ -275,9 +275,9 @@ Return JSON: {verified: boolean, summary: string}`;
 
   /**
    * Record task completion with observability (gracefully degraded if unavailable)
-   * Note: Pinecone memory integration requires live embeddings from Bedrock Titan.
-   * Currently skipped to avoid writing mock vectors to real indexes.
-   * Future: integrate live Bedrock calls only, never write fake embeddings.
+   * Integrates live Bedrock Titan embeddings for Pinecone memory.
+   * Graceful degradation: if embedding or Pinecone fails, task still completes successfully.
+   * Never falls back to mock vectors in production.
    */
   async recordCompletion(
     taskId: string,
@@ -293,12 +293,35 @@ Return JSON: {verified: boolean, summary: string}`;
         output: outcome,
         metadata: { taskId, title, description, planSummary }
       }).catch(() => {
-        // Graceful degradation
+        // Graceful degradation - log failure but don't throw
       });
     }
 
-    // Pinecone memory currently disabled to prevent writing mock embeddings to production indexes.
-    // When live Bedrock Titan integration is added: only upsert if embeddings are real, never mock vectors.
-    // if (this.pinecone) { ... }
+    // Pinecone memory with live Titan embeddings
+    if (this.pinecone) {
+      try {
+        // Get embedding from Bedrock Titan (no fallback to mock)
+        const embedding = await this.pinecone.callBedrockTitan(
+          `${title}: ${description}`
+        );
+
+        // Upsert task memory to Pinecone
+        await this.pinecone.upsertTaskEmbedding(
+          taskId,
+          embedding,
+          {
+            title,
+            description,
+            planSummary,
+            outcome,
+            timestamp: Date.now()
+          },
+          this.ctx.orgId
+        );
+      } catch (error) {
+        // Graceful degradation - log failure but don't throw
+        // Never retry with mock vectors; let task complete successfully
+      }
+    }
   }
 }

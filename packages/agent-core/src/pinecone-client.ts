@@ -48,9 +48,9 @@ export class PineconeClient {
   }
 
   /**
-   * Call Bedrock Titan embeddings API
+   * Call Bedrock Titan embeddings API (live, no fallback to mock)
    */
-  private async callBedrockTitan(text: string): Promise<number[]> {
+  async callBedrockTitan(text: string): Promise<number[]> {
     // Dynamic import to avoid requiring SDK at module load time
     const { BedrockRuntimeClient, InvokeModelCommand } = await import('@aws-sdk/client-bedrock-runtime');
 

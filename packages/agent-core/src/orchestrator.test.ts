@@ -458,7 +458,7 @@ describe('Orchestrator', () => {
       ).resolves.toBeUndefined();
     });
 
-    it('should record task completion with Langfuse only (Pinecone currently disabled to prevent fake embeddings)', async () => {
+    it('should record task completion with live Pinecone integration (gracefully degraded on failure)', async () => {
       const mockLangfuse = {
         startTrace: vi.fn(() => 'trace-123'),
         logGeneration: vi.fn(async () => {}),
@@ -467,7 +467,7 @@ describe('Orchestrator', () => {
       } as any;
 
       const mockPinecone = {
-        embedText: vi.fn(async (text: string) => Array(1024).fill(Math.random())),
+        callBedrockTitan: vi.fn(async (text: string) => Array(1024).fill(0.5)),
         querySimilarTasks: vi.fn(async () => []),
         upsertTaskEmbedding: vi.fn(async () => {})
       } as any;
@@ -495,9 +495,59 @@ describe('Orchestrator', () => {
         })
       );
 
-      // Pinecone currently skipped to prevent writing mock embeddings to real indexes
-      // This test confirms Pinecone is NOT called (no fake vectors in production data)
-      expect(mockPinecone.embedText).not.toHaveBeenCalled();
+      // Pinecone should be called with live Titan embeddings (never mock)
+      expect(mockPinecone.callBedrockTitan).toHaveBeenCalledWith(
+        'Query Issues: Find all open Jira issues'
+      );
+      expect(mockPinecone.upsertTaskEmbedding).toHaveBeenCalledWith(
+        'task-123',
+        expect.any(Array),
+        expect.objectContaining({
+          title: 'Query Issues',
+          description: 'Find all open Jira issues',
+          outcome: 'Found 5 issues'
+        }),
+        'org-123'
+      );
+    });
+
+    it('should gracefully degrade when Bedrock Titan embedding fails (never falls back to mock)', async () => {
+      const mockLangfuse = {
+        startTrace: vi.fn(() => 'trace-123'),
+        logGeneration: vi.fn(async () => {}),
+        logSpan: vi.fn(async () => {}),
+        endTrace: vi.fn(async () => {})
+      } as any;
+
+      const mockPinecone = {
+        callBedrockTitan: vi.fn(async () => {
+          throw new Error('Bedrock Titan connection failed');
+        }),
+        querySimilarTasks: vi.fn(async () => []),
+        upsertTaskEmbedding: vi.fn(async () => {})
+      } as any;
+
+      const observabilityOrchestrator = new Orchestrator(
+        mockTenantContext,
+        mockBedrockClient,
+        mockLangfuse,
+        mockPinecone
+      );
+
+      // Should not throw - graceful degradation
+      await expect(
+        observabilityOrchestrator.recordCompletion(
+          'task-123',
+          'Query Issues',
+          'Find all open Jira issues',
+          'queryJira with JQL filter',
+          'Found 5 issues'
+        )
+      ).resolves.toBeUndefined();
+
+      // Bedrock Titan should have been called
+      expect(mockPinecone.callBedrockTitan).toHaveBeenCalled();
+      // Upsert should NOT have been called (because embedding failed)
       expect(mockPinecone.upsertTaskEmbedding).not.toHaveBeenCalled();
     });
   });

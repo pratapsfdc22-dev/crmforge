@@ -79,3 +79,30 @@ export async function optionalAuth(request: FastifyRequest) {
     }
   }
 }
+
+// Authenticate request and return user context
+export async function authenticateRequest(request: FastifyRequest): Promise<{
+  userId: string;
+  orgId: string;
+  tier: string;
+}> {
+  const token = extractToken(request);
+
+  if (!token) {
+    throw new Error('Unauthorized: Missing authentication token');
+  }
+
+  const user = await verifyToken(token);
+
+  if (!user) {
+    throw new Error('Unauthorized: Invalid or expired token');
+  }
+
+  // In a real implementation, would fetch orgId and tier from database
+  // For now, use placeholder values
+  return {
+    userId: user.id,
+    orgId: 'org-placeholder', // Would be fetched from user's org membership
+    tier: 'professional' // Would be fetched from org subscription
+  };
+}
