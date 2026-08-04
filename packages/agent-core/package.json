@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",
-    "@aws-sdk/client-bedrock-runtime": "^3.600.0"
+    "@aws-sdk/client-bedrock-runtime": "^3.600.0",
+    "zod": "^3.23.8"
   }
 }
