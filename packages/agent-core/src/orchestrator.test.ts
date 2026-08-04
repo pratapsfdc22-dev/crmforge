@@ -13,6 +13,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Orchestrator, PlanSchema } from './orchestrator.js';
 import type { TenantContext } from './tenant-context.js';
 import type { BedrockClient } from './bedrock-client.js';
+import type { LangfuseClient } from './langfuse-client.js';
+import type { PineconeClient } from './pinecone-client.js';
 
 // Mock implementations
 const mockTenantContext: TenantContext = {
@@ -396,6 +398,112 @@ describe('Orchestrator', () => {
       expect(record.input_redacted).not.toContain('secret3');
       expect(record.input_redacted).not.toContain('secret4');
       expect(record.input_redacted).toContain('[REDACTED]');
+    });
+  });
+
+  describe('Observability - Graceful Degradation', () => {
+    it('should complete tasks even when Langfuse and Pinecone are unavailable', async () => {
+      const failingLangfuse = {
+        startTrace: vi.fn(() => 'trace-123'),
+        logGeneration: vi.fn(async () => {
+          throw new Error('Langfuse connection failed');
+        }),
+        logSpan: vi.fn(async () => {
+          throw new Error('Langfuse connection failed');
+        }),
+        endTrace: vi.fn(async () => {
+          throw new Error('Langfuse connection failed');
+        })
+      } as any;
+
+      const failingPinecone = {
+        embedText: vi.fn(async () => {
+          throw new Error('Pinecone connection failed');
+        }),
+        querySimilarTasks: vi.fn(async () => {
+          throw new Error('Pinecone connection failed');
+        }),
+        upsertTaskEmbedding: vi.fn(async () => {
+          throw new Error('Pinecone connection failed');
+        })
+      } as any;
+
+      const observabilityOrchestrator = new Orchestrator(
+        mockTenantContext,
+        mockBedrockClient,
+        failingLangfuse,
+        failingPinecone
+      );
+
+      // Planning should succeed
+      const { plan } = await observabilityOrchestrator.plan('Test intent');
+      expect(plan).toBeDefined();
+      expect(plan.steps.length).toBeGreaterThan(0);
+
+      // Execution should succeed
+      const records = await Promise.all(
+        plan.steps.map((s, i) => observabilityOrchestrator.executeStep(s, i))
+      );
+      expect(records.every(r => r.status === 'completed')).toBe(true);
+
+      // Task completion recording should not throw
+      await expect(
+        observabilityOrchestrator.recordCompletion(
+          'task-123',
+          'Test Query',
+          'Query Jira for issues',
+          'Use queryJira tool',
+          'Successfully found 5 issues'
+        )
+      ).resolves.toBeUndefined();
+    });
+
+    it('should record task completion with observability when available', async () => {
+      const mockLangfuse = {
+        startTrace: vi.fn(() => 'trace-123'),
+        logGeneration: vi.fn(async () => {}),
+        logSpan: vi.fn(async () => {}),
+        endTrace: vi.fn(async () => {})
+      } as any;
+
+      const mockPinecone = {
+        embedText: vi.fn(async (text: string) => Array(1536).fill(Math.random())),
+        querySimilarTasks: vi.fn(async () => []),
+        upsertTaskEmbedding: vi.fn(async () => {})
+      } as any;
+
+      const observabilityOrchestrator = new Orchestrator(
+        mockTenantContext,
+        mockBedrockClient,
+        mockLangfuse,
+        mockPinecone
+      );
+
+      await observabilityOrchestrator.recordCompletion(
+        'task-123',
+        'Query Issues',
+        'Find all open Jira issues',
+        'queryJira with JQL filter',
+        'Found 5 issues'
+      );
+
+      expect(mockLangfuse.logSpan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'task_completion',
+          output: 'Found 5 issues'
+        })
+      );
+
+      expect(mockPinecone.embedText).toHaveBeenCalled();
+      expect(mockPinecone.upsertTaskEmbedding).toHaveBeenCalledWith(
+        'task-123',
+        expect.any(Array),
+        expect.objectContaining({
+          title: 'Query Issues',
+          outcome: 'Found 5 issues'
+        }),
+        'org-123'
+      );
     });
   });
 });

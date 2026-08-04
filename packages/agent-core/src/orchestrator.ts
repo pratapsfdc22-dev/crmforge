@@ -13,6 +13,8 @@
 import { z } from 'zod';
 import type { TenantContext } from './tenant-context.js';
 import type { BedrockClient } from './bedrock-client.js';
+import type { LangfuseClient } from './langfuse-client.js';
+import type { PineconeClient } from './pinecone-client.js';
 import { TOOL_REGISTRY, type ToolName } from './tools.js';
 
 /**
@@ -80,7 +82,9 @@ export class Orchestrator {
 
   constructor(
     private ctx: TenantContext,
-    private bedrockClient: BedrockClient
+    private bedrockClient: BedrockClient,
+    private langfuse?: LangfuseClient,
+    private pinecone?: PineconeClient
   ) {}
 
   /**
@@ -267,5 +271,48 @@ Return JSON: {verified: boolean, summary: string}`;
    */
   getMaxSteps(): number {
     return this.maxSteps;
+  }
+
+  /**
+   * Record task completion with observability (gracefully degraded if unavailable)
+   */
+  async recordCompletion(
+    taskId: string,
+    title: string,
+    description: string,
+    planSummary: string,
+    outcome: string
+  ): Promise<void> {
+    // Log to Langfuse if available
+    if (this.langfuse) {
+      await this.langfuse.logSpan({
+        name: 'task_completion',
+        output: outcome,
+        metadata: { taskId, title, description, planSummary }
+      }).catch(() => {
+        // Graceful degradation
+      });
+    }
+
+    // Upsert to Pinecone if available
+    if (this.pinecone) {
+      try {
+        const embedding = await this.pinecone.embedText(`${title} ${description} ${planSummary}`);
+        await this.pinecone.upsertTaskEmbedding(
+          taskId,
+          embedding,
+          {
+            title,
+            description,
+            planSummary,
+            outcome,
+            timestamp: Date.now()
+          },
+          this.ctx.orgId
+        );
+      } catch (error) {
+        // Graceful degradation
+      }
+    }
   }
 }

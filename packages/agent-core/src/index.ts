@@ -6,3 +6,5 @@ export * from './tools';
 export * from './orchestrator';
 export * from './tenant-context';
 export * from './bedrock-client';
+export * from './langfuse-client';
+export * from './pinecone-client';
