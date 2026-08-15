@@ -2,8 +2,11 @@
  * Bedrock client tests - tier routing, retry behavior, error handling
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { BedrockClient, BedrockThrottlingError } from './bedrock-client';
+import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
+
+vi.mock('@aws-sdk/client-bedrock-runtime');
 
 describe('BedrockClient', () => {
   beforeEach(() => {
@@ -11,6 +14,24 @@ describe('BedrockClient', () => {
     // Clear environment
     delete process.env.BEDROCK_HAIKU_MODEL_ID;
     delete process.env.BEDROCK_SONNET_MODEL_ID;
+
+    // Mock BedrockRuntimeClient.send() to return successful response
+    const mockSend = vi.fn().mockResolvedValue({
+      output: {
+        message: {
+          content: [{ text: 'Mock response from Bedrock' }]
+        }
+      },
+      stopReason: 'end_turn',
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50
+      }
+    });
+
+    (BedrockRuntimeClient as any).mockImplementation(() => ({
+      send: mockSend
+    }));
   });
 
   describe('tier-based model routing', () => {
@@ -33,6 +54,11 @@ describe('BedrockClient', () => {
     it('should use Sonnet for trial tier', () => {
       const client = new BedrockClient('trial');
       expect(client['modelId']).toContain('sonnet');
+    });
+
+    it('should use cross-region inference profiles with us. prefix', () => {
+      const client = new BedrockClient('professional');
+      expect(client['modelId']).toMatch(/^us\.anthropic\./);
     });
 
     it('should respect BEDROCK_HAIKU_MODEL_ID env var', () => {
@@ -89,8 +115,8 @@ describe('BedrockClient', () => {
       const callArg = spy.mock.calls[0]?.[0] as any;
       expect(callArg.inferenceConfig).toEqual({
         maxTokens: 1024,
-        temperature: 0.7,
-        topP: 0.9
+        temperature: 0.7
+        // topP is omitted: Bedrock's Sonnet models don't accept both temperature and topP
       });
     });
 
@@ -219,8 +245,8 @@ describe('BedrockClient', () => {
       const config = (spy.mock.calls[0]?.[0] as any)?.inferenceConfig;
       expect(config).toEqual({
         maxTokens: 2048,
-        temperature: 0.2,
-        topP: 0.5
+        temperature: 0.2
+        // topP parameter is ignored: Bedrock's Sonnet models don't accept both temperature and topP
       });
     });
   });

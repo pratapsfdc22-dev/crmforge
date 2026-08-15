@@ -4,6 +4,7 @@
  * Retry with jittered backoff on throttling
  */
 
+import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 import type { Tier } from './tenant-context';
 
 export interface BedrockInvokeParams {
@@ -61,19 +62,23 @@ export class BedrockClient {
   private modelId: string;
   private tier: Tier;
   private maxRetries: number;
+  private bedrockClient: BedrockRuntimeClient;
 
   constructor(tier: Tier, modelIdOverride?: string) {
     this.tier = tier;
     this.maxRetries = 3;
 
+    const region = process.env.AWS_REGION || 'us-east-1';
+    this.bedrockClient = new BedrockRuntimeClient({ region });
+
     if (modelIdOverride) {
       this.modelId = modelIdOverride;
     } else {
-      // Use inference profile for tier-based routing
+      // Use cross-region inference profiles (us.anthropic.* format)
       if (tier === 'starter') {
-        this.modelId = process.env.BEDROCK_HAIKU_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0';
+        this.modelId = process.env.BEDROCK_HAIKU_MODEL_ID || 'us.anthropic.claude-haiku-4-5-20250514-v1:0';
       } else {
-        this.modelId = process.env.BEDROCK_SONNET_MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v1:0';
+        this.modelId = process.env.BEDROCK_SONNET_MODEL_ID || 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
       }
     }
   }
@@ -91,8 +96,9 @@ export class BedrockClient {
       ...(params.system && { system: [{ type: 'text', text: params.system }] }),
       inferenceConfig: {
         maxTokens: params.maxTokens ?? 1024,
-        temperature: params.temperature ?? 0.7,
-        topP: params.topP ?? 0.9
+        temperature: params.temperature ?? 0.7
+        // Note: topP and temperature are mutually exclusive on Bedrock's Sonnet models
+        // so we use temperature only and omit topP
       }
     };
 
@@ -122,35 +128,62 @@ export class BedrockClient {
   }
 
   /**
-   * Call Bedrock Converse API
-   * In production, this would use AWS SDK; for now, mock for testing
+   * Call Bedrock Converse API via AWS SDK
    */
   private async callBedrockConverse(request: ConverseRequest): Promise<BedrockInvokeResponse> {
-    // Simulate Bedrock API call
-    // In production: new BedrockRuntimeClient().converse(request)
-    const response: ConverseResponse = {
-      output: {
-        message: {
-          content: [{ type: 'text', text: 'Mock response' }]
-        }
-      },
-      stopReason: 'end_turn',
-      usage: {
-        inputTokens: 100,
-        outputTokens: 50
+    try {
+      console.log('[BedrockClient] Calling Bedrock Converse with modelId:', request.modelId);
+      console.log('[BedrockClient] AWS credentials present - ACCESS_KEY:', !!process.env.AWS_ACCESS_KEY_ID, 'SECRET_KEY:', !!process.env.AWS_SECRET_ACCESS_KEY);
+
+      const command = new ConverseCommand({
+        modelId: request.modelId,
+        messages: request.messages as any,
+        system: request.system,
+        inferenceConfig: request.inferenceConfig
+      });
+
+      console.log('[BedrockClient] Sending command to Bedrock...');
+
+      // Wrap send() with a 15-second timeout
+      const sendPromise = this.bedrockClient.send(command);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Bedrock call timed out after 15 seconds')), 15000)
+      );
+
+      const response = await Promise.race([sendPromise, timeoutPromise]);
+      console.log('[BedrockClient] Bedrock responded successfully');
+
+      // Extract text content from response
+      if (!response.output?.message?.content?.[0]) {
+        throw new Error('Bedrock returned empty response');
       }
-    };
 
-    const content = response.output.message.content[0];
-    if (content.type !== 'text') {
-      throw new Error('Unexpected Bedrock response format');
+      const contentBlock = response.output.message.content[0];
+
+      // ContentBlock is a union; check for text type
+      const textContent = (contentBlock as any)?.text;
+      if (!textContent || typeof textContent !== 'string') {
+        throw new Error('Unexpected Bedrock response format: expected text content');
+      }
+
+      return {
+        content: textContent,
+        stopReason: response.stopReason || 'end_turn',
+        usage: response.usage ? {
+          inputTokens: response.usage.inputTokens || 0,
+          outputTokens: response.usage.outputTokens || 0
+        } : { inputTokens: 0, outputTokens: 0 }
+      };
+    } catch (error) {
+      console.error('[BedrockClient] Error calling Bedrock:', error instanceof Error ? error.message : String(error));
+      // Check for throttling (429) / rate limit errors
+      if (error instanceof Error) {
+        if (error.name === 'ThrottlingException' || error.message.includes('rate')) {
+          throw new BedrockThrottlingError(error.message);
+        }
+      }
+      throw error;
     }
-
-    return {
-      content: content.text,
-      stopReason: response.stopReason,
-      usage: response.usage
-    };
   }
 
   /**

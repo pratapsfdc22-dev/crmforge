@@ -41,105 +41,114 @@ async function startWorker() {
   // Register handler for orchestrate-task jobs
   console.log('[Worker] Registering work handler for orchestrate-task...');
 
-  // Error handler - catch all errors
+  // Error handler - catch all queue-level errors
   queue.on('error', (err) => {
     console.error('[Worker Queue Error]:', err);
   });
 
-  // Failed job handler
-  queue.on('failed', (jobId, err) => {
-    console.error(`[Worker Failed Job] ${jobId}:`, err);
+  // Monitor state changes (for debugging job state transitions)
+  queue.on('monitor-states', (states) => {
+    if (states.queues['orchestrate-task']?.active > 0) {
+      console.log(`[Worker] Active jobs: ${states.queues['orchestrate-task'].active}`);
+    }
   });
 
   // Work handler - receives array of jobs from pg-boss
   const workPromise = queue.work('orchestrate-task', async (jobs: any[]) => {
     console.log('[Worker Handler] *** HANDLER INVOKED ***');
     for (const job of jobs) {
+      let taskData: TaskJob | undefined;
       try {
-        const taskData: TaskJob = job.data;
-        console.log(`[Worker] ✓ JOB RECEIVED: Processing task ${taskData.taskId} for org ${taskData.orgId}`);
+        taskData = job.data;
+        if (!taskData) throw new Error('Job data is missing');
 
-      // Update state: queued -> planning
-      await stateManager.updateState(taskData.taskId, 'planning');
+        const task = taskData; // Narrow the type for TypeScript
+        console.log(`[Worker] ✓ JOB RECEIVED: Processing task ${task.taskId} for org ${task.orgId}`);
 
-      // Build tenant context from task data
-      const ctx: TenantContext = {
-        orgId: taskData.orgId,
-        userId: taskData.userId,
-        tier: taskData.tier as any,
-        sfConnection: taskData.sfConnection || {
-          instanceUrl: 'https://login.salesforce.com',
-          accessToken: '',
-          expiresAt: Date.now()
-        },
-        jiraToken: taskData.jiraToken || null,
-        n8nConnection: taskData.n8nConnection || null,
-      };
+        // Update state: queued -> planning
+        await stateManager.updateState(task.taskId, 'planning');
 
-      // Create orchestrator with all observability clients
-      const orchestrator = new Orchestrator(
-        ctx,
-        bedrockClient,
-        langfuseClient,
-        pineconeClient
-      );
+        // Build tenant context from task data
+        const ctx: TenantContext = {
+          orgId: task.orgId,
+          userId: task.userId,
+          tier: task.tier as any,
+          sfConnection: task.sfConnection || {
+            instanceUrl: 'https://login.salesforce.com',
+            accessToken: '',
+            expiresAt: Date.now()
+          },
+          jiraToken: task.jiraToken || null,
+          n8nConnection: task.n8nConnection || null,
+        };
 
-      // Phase 1: Planning
-      console.log(`[Worker] Planning task ${taskData.taskId}...`);
-      const { plan, repaired } = await orchestrator.plan(taskData.intent);
-      console.log(
-        `[Worker] Plan generated: ${plan.steps.length} steps, risk=${plan.risk}, repaired=${repaired}`
-      );
+        // Create orchestrator with all observability clients
+        const orchestrator = new Orchestrator(
+          ctx,
+          bedrockClient,
+          langfuseClient,
+          pineconeClient
+        );
 
-      // Save plan to database
-      await stateManager.setPlan(taskData.taskId, plan);
+        // Phase 1: Planning
+        console.log(`[Worker] Planning task ${task.taskId}...`);
+        const { plan, repaired } = await orchestrator.plan(task.intent);
+        console.log(
+          `[Worker] Plan generated: ${plan.steps.length} steps, risk=${plan.risk}, repaired=${repaired}`
+        );
 
-      // Phase 2: Execution
-      await stateManager.updateState(taskData.taskId, 'executing');
-      console.log(`[Worker] Executing ${plan.steps.length} steps...`);
+        // Save plan to database
+        await stateManager.setPlan(task.taskId, plan);
 
-      const records = await Promise.all(
-        plan.steps.map(async (step, idx) => {
-          const record = await orchestrator.executeStep(step, idx);
-          // Write step result to DB as it completes
-          await stateManager.addStep(taskData.taskId, record);
-          return record;
-        })
-      );
+        // Phase 2: Execution
+        await stateManager.updateState(task.taskId, 'executing');
+        console.log(`[Worker] Executing ${plan.steps.length} steps...`);
 
-      console.log(
-        `[Worker] Execution complete: ${records.filter(r => r.status === 'completed').length}/${records.length} successful`
-      );
+        const records = await Promise.all(
+          plan.steps.map(async (step, idx) => {
+            const record = await orchestrator.executeStep(step, idx);
+            // Write step result to DB as it completes
+            await stateManager.addStep(task.taskId, record);
+            return record;
+          })
+        );
 
-      // Phase 3: Verification
-      await stateManager.updateState(taskData.taskId, 'verifying');
-      console.log(`[Worker] Verifying task completion...`);
-      const { verified, summary } = await orchestrator.verify(taskData.intent, records);
-      console.log(`[Worker] Verification result: verified=${verified}, summary=${summary}`);
+        console.log(
+          `[Worker] Execution complete: ${records.filter(r => r.status === 'completed').length}/${records.length} successful`
+        );
 
-      // Phase 4: Record completion with real Pinecone integration
-      console.log(`[Worker] Recording task completion...`);
-      await orchestrator.recordCompletion(
-        taskData.taskId,
-        'Task Execution',
-        taskData.intent,
-        plan.summary,
-        summary
-      );
+        // Phase 3: Verification
+        await stateManager.updateState(task.taskId, 'verifying');
+        console.log(`[Worker] Verifying task completion...`);
+        const { verified, summary } = await orchestrator.verify(task.intent, records);
+        console.log(`[Worker] Verification result: verified=${verified}, summary=${summary}`);
 
-      // Final state: succeeded or failed based on verification
-      const finalState = verified ? 'succeeded' : 'failed';
-      await stateManager.completeTask(taskData.taskId, finalState as any);
+        // Phase 4: Record completion with real Pinecone integration
+        console.log(`[Worker] Recording task completion...`);
+        await orchestrator.recordCompletion(
+          task.taskId,
+          'Task Execution',
+          task.intent,
+          plan.summary,
+          summary
+        );
 
-      console.log(`[Worker] Task ${taskData.taskId} completed with state: ${finalState}`);
+        // Final state: succeeded or failed based on verification
+        const finalState = verified ? 'succeeded' : 'failed';
+        await stateManager.completeTask(task.taskId, finalState as any);
+
+        console.log(`[Worker] Task ${task.taskId} completed with state: ${finalState}`);
       } catch (error) {
-        console.error(`[Worker] Task ${taskData.taskId} failed:`, error);
-        // Mark task as failed
-        await stateManager.completeTask(
-          taskData.taskId,
-          'failed',
-          error instanceof Error ? error.message : 'Unknown error'
-        ).catch(err => console.error('[Worker] Failed to mark task failed:', err));
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[Worker] Task orchestration failed:`, error);
+        // Mark task as failed in database if we successfully extracted the task data
+        if (taskData) {
+          await stateManager.completeTask(
+            taskData.taskId,
+            'failed',
+            errorMsg
+          ).catch(err => console.error('[Worker] Failed to mark task failed:', err));
+        }
         throw error; // pg-boss will handle retry
       }
     }
