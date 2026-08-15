@@ -51,13 +51,14 @@ async function startWorker() {
     console.error(`[Worker Failed Job] ${jobId}:`, err);
   });
 
-  // Work handler
-  const workPromise = queue.work('orchestrate-task', async (job: any) => {
+  // Work handler - receives array of jobs from pg-boss
+  const workPromise = queue.work('orchestrate-task', async (jobs: any[]) => {
     console.log('[Worker Handler] *** HANDLER INVOKED ***');
-    const taskData: TaskJob = job.data;
-    console.log(`[Worker] ✓ JOB RECEIVED: Processing task ${taskData.taskId} for org ${taskData.orgId}`);
+    for (const job of jobs) {
+      try {
+        const taskData: TaskJob = job.data;
+        console.log(`[Worker] ✓ JOB RECEIVED: Processing task ${taskData.taskId} for org ${taskData.orgId}`);
 
-    try {
       // Update state: queued -> planning
       await stateManager.updateState(taskData.taskId, 'planning');
 
@@ -131,15 +132,16 @@ async function startWorker() {
       await stateManager.completeTask(taskData.taskId, finalState as any);
 
       console.log(`[Worker] Task ${taskData.taskId} completed with state: ${finalState}`);
-    } catch (error) {
-      console.error(`[Worker] Task ${taskData.taskId} failed:`, error);
-      // Mark task as failed
-      await stateManager.completeTask(
-        taskData.taskId,
-        'failed',
-        error instanceof Error ? error.message : 'Unknown error'
-      ).catch(err => console.error('[Worker] Failed to mark task failed:', err));
-      throw error; // pg-boss will handle retry
+      } catch (error) {
+        console.error(`[Worker] Task ${taskData.taskId} failed:`, error);
+        // Mark task as failed
+        await stateManager.completeTask(
+          taskData.taskId,
+          'failed',
+          error instanceof Error ? error.message : 'Unknown error'
+        ).catch(err => console.error('[Worker] Failed to mark task failed:', err));
+        throw error; // pg-boss will handle retry
+      }
     }
   });
 

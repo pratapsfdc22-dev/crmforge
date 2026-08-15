@@ -153,12 +153,15 @@ Never include credentials in inputs. Inputs are validated and credentials inject
           const plan = PlanSchema.parse(parsed);
 
           return { plan, repaired: true };
-        } catch {
-          throw new Error('Failed to generate valid plan after repair');
+        } catch (repairErr) {
+          const repairMessage = repairErr instanceof Error ? repairErr.message : String(repairErr);
+          throw new Error(`Failed to generate valid plan after repair. Initial error: ${error instanceof Error ? error.message : String(error)}. Repair error: ${repairMessage}`);
         }
       }
 
-      throw error;
+      // If error doesn't match JSON pattern, log and rethrow
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to generate plan: ${errorMsg}`);
     }
   }
 
