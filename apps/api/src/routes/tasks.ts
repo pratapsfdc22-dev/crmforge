@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { getQueue, TaskJob } from '../lib/queue.js';
+import { getQueue, getQueueConnectionDetails, TaskJob } from '../lib/queue.js';
 import { TaskStateManager } from '../lib/task-state.js';
 import { authenticateRequest } from '../lib/auth.js';
 import { getSupabaseClient } from '../lib/supabase.js';
@@ -50,6 +50,8 @@ export async function taskRoutes(fastify: FastifyInstance) {
           tier: auth.tier,
         };
 
+        const queueConnDetails = getQueueConnectionDetails();
+        console.log('[Tasks Route] Queue.send() about to use: host=' + queueConnDetails.host + ' port=' + queueConnDetails.port + ' db=' + queueConnDetails.database);
         console.log('[Tasks Route] Sending job to queue name: "orchestrate-task"', { taskId: job.taskId });
         let sendResult;
         try {
@@ -58,7 +60,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
             retryDelay: 5,
             expireInSeconds: 3600,
           });
-          console.log('[Tasks Route] ✓ Job sent successfully. Result:', sendResult);
+          console.log('[Tasks Route] ✓ Job persisted to queue table. pg-boss result:', sendResult);
         } catch (sendErr) {
           console.error('[Tasks Route] ✗ queue.send() threw error:', sendErr);
           throw sendErr;

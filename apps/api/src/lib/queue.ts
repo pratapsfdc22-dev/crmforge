@@ -3,6 +3,23 @@ import { env } from '../config/env.js';
 
 let queue: InstanceType<typeof PgBoss> | null = null;
 
+function parseConnectionString(connStr: string): { host: string; port: string; database: string } {
+  try {
+    const url = new URL(connStr);
+    const host = url.hostname;
+    const port = url.port || '5432';
+    const database = url.pathname.substring(1) || 'postgres';
+    return { host, port, database };
+  } catch {
+    return { host: 'unknown', port: 'unknown', database: 'unknown' };
+  }
+}
+
+export function getQueueConnectionDetails() {
+  const pgbossUrl = env.PGBOSS_DATABASE_URL || env.DATABASE_URL;
+  return parseConnectionString(pgbossUrl);
+}
+
 export async function initQueue(): Promise<InstanceType<typeof PgBoss>> {
   if (queue) {
     return queue;
@@ -13,8 +30,10 @@ export async function initQueue(): Promise<InstanceType<typeof PgBoss>> {
   // pg-boss requires direct connection (not pooler) for LISTEN/NOTIFY
   const pgbossUrl = env.PGBOSS_DATABASE_URL || env.DATABASE_URL;
   const isPooler = pgbossUrl.includes('pooler');
+  const connDetails = getQueueConnectionDetails();
   console.log('[Queue] Using connection:', pgbossUrl.substring(0, 50) + '...');
   console.log('[Queue] Connection type:', isPooler ? '⚠️  POOLER (may not support LISTEN/NOTIFY)' : '✓ Direct');
+  console.log('[Queue] Parsed host:port:db at init:', connDetails.host + ':' + connDetails.port + ':' + connDetails.database);
 
   queue = new PgBoss({
     connectionString: pgbossUrl,
@@ -34,11 +53,21 @@ export async function initQueue(): Promise<InstanceType<typeof PgBoss>> {
   try {
     await Promise.race([startPromise, timeoutPromise]);
     console.log('[Queue] ✓ queue.start() completed successfully');
-    console.log('[Queue] Now listening for jobs on queue name: "orchestrate-task"');
   } catch (err) {
     console.error('[Queue] ✗ queue.start() failed:', err instanceof Error ? err.message : err);
     queue = null;
     throw err;
+  }
+
+  // Explicitly create the queue if it doesn't exist
+  // pg-boss's send() requires a row in pgboss.queue matching the job name
+  try {
+    console.log('[Queue] Creating queue entry for "orchestrate-task"...');
+    await queue.createQueue('orchestrate-task');
+    console.log('[Queue] ✓ Queue "orchestrate-task" created/verified');
+  } catch (err) {
+    console.error('[Queue] ⚠️  Failed to create queue:', err instanceof Error ? err.message : err);
+    // Don't throw here; the queue might already exist
   }
 
   console.log('[Queue] ✓ PgBoss started and ready');
