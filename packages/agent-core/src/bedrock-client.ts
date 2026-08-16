@@ -76,7 +76,7 @@ export class BedrockClient {
     } else {
       // Use cross-region inference profiles (us.anthropic.* format)
       if (tier === 'starter') {
-        this.modelId = process.env.BEDROCK_HAIKU_MODEL_ID || 'us.anthropic.claude-haiku-4-5-20250514-v1:0';
+        this.modelId = process.env.BEDROCK_HAIKU_MODEL_ID || 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
       } else {
         this.modelId = process.env.BEDROCK_SONNET_MODEL_ID || 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
       }
