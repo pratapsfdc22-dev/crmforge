@@ -9,22 +9,89 @@ const createTaskSchema = z.object({
   intent: z.string().min(1),
 });
 
+function getTestAuthIfAllowed(request: FastifyRequest): { userId: string; orgId: string; tier: string } | null {
+  // SECURITY: Test auth header only allowed in development with explicit opt-in flag
+  // This check FAILS SAFE: missing/undefined env var means bypass is OFF
+  const isDev = process.env.NODE_ENV === 'development';
+  const testAuthEnabled = process.env.ALLOW_TEST_AUTH_HEADER === 'true';
+
+  if (!isDev || !testAuthEnabled) {
+    return null;
+  }
+
+  const testOrg = request.headers['x-test-org'] as string | undefined;
+  if (!testOrg) {
+    return null;
+  }
+
+  return {
+    userId: 'test-user',
+    orgId: testOrg,
+    tier: 'professional'
+  };
+}
+
 export async function taskRoutes(fastify: FastifyInstance) {
+  // GET /tasks - List tasks for org
+  fastify.get(
+    '/tasks',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        let auth = getTestAuthIfAllowed(request);
+        if (!auth) {
+          auth = await authenticateRequest(request);
+        }
+
+        const query = request.query as { limit?: string; offset?: string };
+        const limit = Math.min(parseInt(query.limit || '20') || 20, 100);
+        const offset = parseInt(query.offset || '0') || 0;
+
+        const supabase = getSupabaseClient();
+
+        // TODO: regenerate packages/db/src/types.ts to include tasks table schema
+        // Currently using 'as any' workaround due to stale Supabase types
+        const { data: tasks, error } = await (supabase
+          .from('tasks' as any)
+          .select('*')
+          .eq('org_id', auth.orgId)
+          .order('created_at', { ascending: false })
+          .range(offset, offset + limit - 1) as any);
+
+        if (error) throw error;
+
+        return reply.send({
+          tasks: tasks.map((t: any) => ({
+            id: t.id,
+            org_id: t.org_id,
+            user_id: t.user_id,
+            intent: t.intent,
+            state: t.state,
+            plan: t.plan,
+            steps: t.steps || [],
+            error: t.error,
+            created_at: t.created_at,
+            started_at: t.started_at,
+            completed_at: t.completed_at
+          })),
+          offset,
+          limit
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(401).send({
+          error: 'Unauthorized'
+        });
+      }
+    }
+  );
+
   // POST /tasks - Enqueue a new task
   fastify.post<{ Body: z.infer<typeof createTaskSchema> }>(
     '/tasks',
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        let auth;
-        // Allow X-Test-Org header for local testing
-        const testOrg = request.headers['x-test-org'];
-        if (testOrg) {
-          auth = {
-            userId: 'test-user',
-            orgId: testOrg as string,
-            tier: 'professional'
-          };
-        } else {
+        let auth = getTestAuthIfAllowed(request);
+        if (!auth) {
           auth = await authenticateRequest(request);
         }
 
@@ -85,16 +152,8 @@ export async function taskRoutes(fastify: FastifyInstance) {
     '/tasks/:id/events',
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        let auth;
-        // Allow X-Test-Org header for local testing
-        const testOrg = request.headers['x-test-org'];
-        if (testOrg) {
-          auth = {
-            userId: 'test-user',
-            orgId: testOrg as string,
-            tier: 'professional'
-          };
-        } else {
+        let auth = getTestAuthIfAllowed(request);
+        if (!auth) {
           auth = await authenticateRequest(request);
         }
 

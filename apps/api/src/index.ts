@@ -51,6 +51,12 @@ await fastify.register(taskRoutes);
 const start = async () => {
   try {
     console.log('[Main] Starting API server...');
+
+    // Security: Warn if test auth header is enabled
+    if (process.env.ALLOW_TEST_AUTH_HEADER === 'true') {
+      console.warn('⚠️  TEST_AUTH_HEADER ENABLED - local development only, NEVER for production');
+    }
+
     console.log('[Main] Initializing queue...');
     await initQueue();
     console.log('[Main] Queue initialized successfully');
