@@ -10,7 +10,7 @@ const createTaskSchema = z.object({
 });
 
 function getTestAuthIfAllowed(request: FastifyRequest): { userId: string; orgId: string; tier: string } | null {
-  // SECURITY: Test auth header only allowed in development with explicit opt-in flag
+  // SECURITY: Test auth/org only allowed in development with explicit opt-in flag
   // This check FAILS SAFE: missing/undefined env var means bypass is OFF
   const isDev = process.env.NODE_ENV === 'development';
   const testAuthEnabled = process.env.ALLOW_TEST_AUTH_HEADER === 'true';
@@ -19,7 +19,12 @@ function getTestAuthIfAllowed(request: FastifyRequest): { userId: string; orgId:
     return null;
   }
 
-  const testOrg = request.headers['x-test-org'] as string | undefined;
+  // Check both header and query param (EventSource can't send custom headers, only query params)
+  let testOrg = request.headers['x-test-org'] as string | undefined;
+  if (!testOrg && request.query && typeof request.query === 'object') {
+    testOrg = (request.query as any)['x-test-org'] as string | undefined;
+  }
+
   if (!testOrg) {
     return null;
   }
