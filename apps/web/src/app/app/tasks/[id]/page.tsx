@@ -10,6 +10,7 @@ export default function TaskDetailPage() {
 
   // TODO: Fetch initial task state from API
   // For now, use minimal placeholder — TaskDetail will poll for actual state via SSE
+  // Use a fixed timestamp (ISO epoch) so it doesn't change between server/client renders (hydration safety)
   const initialTask: Task = {
     id: taskId,
     org_id: 'test-org-1',
@@ -17,7 +18,7 @@ export default function TaskDetailPage() {
     intent: 'Loading task...',
     state: 'queued',
     steps: [],
-    created_at: new Date().toISOString(),
+    created_at: '2026-08-18T02:00:00.000Z',
   };
 
   return (

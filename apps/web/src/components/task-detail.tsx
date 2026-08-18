@@ -26,6 +26,12 @@ export function TaskDetail({ taskId, initialTask }: { taskId: string; initialTas
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastEventTime, setLastEventTime] = useState<Date | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Format timestamps only after hydration to prevent server/client mismatch
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   useEffect(() => {
     // SSE connection with reconnect logic for timeout events
@@ -216,7 +222,10 @@ export function TaskDetail({ taskId, initialTask }: { taskId: string; initialTas
       {task.state === 'succeeded' && (
         <div className="p-4 rounded-lg bg-green-50 border border-green-200">
           <h3 className="font-semibold text-green-900 mb-2">Completed Successfully</h3>
-          <p className="text-sm text-green-800">Task finished at {new Date(task.completed_at || '').toLocaleString()}</p>
+          <p className="text-sm text-green-800">
+            Task finished at{' '}
+            {hydrated && task.completed_at ? new Date(task.completed_at).toLocaleString() : '—'}
+          </p>
         </div>
       )}
 
@@ -231,10 +240,16 @@ export function TaskDetail({ taskId, initialTask }: { taskId: string; initialTas
 
       {/* Metadata */}
       <div className="text-xs text-muted-foreground space-y-1 p-4 rounded-lg bg-slate-50">
-        <div>Created: {new Date(task.created_at).toLocaleString()}</div>
-        {task.started_at && <div>Started: {new Date(task.started_at).toLocaleString()}</div>}
-        {task.completed_at && <div>Completed: {new Date(task.completed_at).toLocaleString()}</div>}
-        {lastEventTime && <div>Last update: {lastEventTime.toLocaleTimeString()}</div>}
+        <div>Created: {hydrated ? new Date(task.created_at).toLocaleString() : '—'}</div>
+        {task.started_at && (
+          <div>Started: {hydrated ? new Date(task.started_at).toLocaleString() : '—'}</div>
+        )}
+        {task.completed_at && (
+          <div>Completed: {hydrated ? new Date(task.completed_at).toLocaleString() : '—'}</div>
+        )}
+        {lastEventTime && (
+          <div>Last update: {hydrated ? lastEventTime.toLocaleTimeString() : '—'}</div>
+        )}
       </div>
     </div>
   );
