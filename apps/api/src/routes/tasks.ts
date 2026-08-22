@@ -173,10 +173,18 @@ export async function taskRoutes(fastify: FastifyInstance) {
           return reply.code(404).send({ error: 'Task not found' });
         }
 
-        // Set SSE headers
-        reply.header('Content-Type', 'text/event-stream');
+        // Set SSE headers and flush to ensure CORS headers are sent
+        reply.type('text/event-stream');
         reply.header('Cache-Control', 'no-cache');
         reply.header('Connection', 'keep-alive');
+
+        // Call sendrawHeaders to finalize headers (including CORS) before writing body
+        const headers = reply.getHeaders();
+        const stringHeaders: Record<string, string> = {};
+        for (const [key, value] of Object.entries(headers)) {
+         stringHeaders[key] = String(value);
+        }
+        reply.raw.writeHead(200, stringHeaders);
 
         // Write initial connection message with current state
         reply.raw.write(

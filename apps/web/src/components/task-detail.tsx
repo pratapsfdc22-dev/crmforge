@@ -37,14 +37,20 @@ export function TaskDetail({ taskId, initialTask }: { taskId: string; initialTas
     // SSE connection with reconnect logic for timeout events
     let unsubscribe: (() => void) | null = null;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let isMounted = true;
 
     const connect = () => {
+      // Close any existing connection before creating a new one
+      unsubscribe?.();
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+
       setIsConnecting(true);
       setError(null);
 
       unsubscribe = subscribeToTaskEvents(
         taskId,
         (event: SSEEvent) => {
+          if (!isMounted) return;
           setLastEventTime(new Date());
 
           switch (event.type) {
@@ -85,9 +91,11 @@ export function TaskDetail({ taskId, initialTask }: { taskId: string; initialTas
             case 'timeout':
               // Server closed connection after 60s — reconnect automatically
               setError('Connection timeout (60s). Reconnecting...');
-              setTimeout(() => {
-                connect();
-              }, 500);
+              if (isMounted) {
+                reconnectTimeout = setTimeout(() => {
+                  if (isMounted) connect();
+                }, 500);
+              }
               break;
 
             case 'error':
@@ -97,14 +105,16 @@ export function TaskDetail({ taskId, initialTask }: { taskId: string; initialTas
           }
         },
         (err) => {
+          if (!isMounted) return;
           setError(err.message);
           setIsConnecting(false);
         },
         () => {
           // Connection closed — only reconnect if task isn't finished
+          if (!isMounted) return;
           if (task.state !== 'succeeded' && task.state !== 'failed') {
             reconnectTimeout = setTimeout(() => {
-              connect();
+              if (isMounted) connect();
             }, 1000);
           }
         }
@@ -115,10 +125,11 @@ export function TaskDetail({ taskId, initialTask }: { taskId: string; initialTas
     connect();
 
     return () => {
+      isMounted = false;
       unsubscribe?.();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
     };
-  }, [taskId, task.state]);
+  }, [taskId]);
 
   const stateLabel = task.state.replace(/_/g, ' ').charAt(0).toUpperCase() + task.state.slice(1).replace(/_/g, ' ');
   const isRunning = task.state !== 'succeeded' && task.state !== 'failed';
