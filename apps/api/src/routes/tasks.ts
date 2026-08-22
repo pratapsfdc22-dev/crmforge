@@ -178,8 +178,8 @@ export async function taskRoutes(fastify: FastifyInstance) {
         reply.header('Cache-Control', 'no-cache');
         reply.header('Connection', 'keep-alive');
 
-        // Send initial connection message with current state
-        reply.send(
+        // Write initial connection message with current state
+        reply.raw.write(
           `data: ${JSON.stringify({
             type: 'connected',
             taskId,
@@ -192,28 +192,32 @@ export async function taskRoutes(fastify: FastifyInstance) {
         let lastState = task.state;
         let pollCount = 0;
         const maxPolls = 120; // 60 seconds
+        let streamClosed = false;
 
         const pollInterval = setInterval(async () => {
+          if (streamClosed) return;
           pollCount++;
 
           try {
             const updated = await stateManager.getTask(taskId);
             if (!updated) {
               clearInterval(pollInterval);
-              reply.send(
+              reply.raw.write(
                 `data: ${JSON.stringify({
                   type: 'error',
                   message: 'Task not found',
                   timestamp: new Date().toISOString(),
                 })}\n\n`
               );
+              streamClosed = true;
+              reply.raw.end();
               return;
             }
 
             // Send state change event
             if (updated.state !== lastState) {
               lastState = updated.state;
-              reply.send(
+              reply.raw.write(
                 `data: ${JSON.stringify({
                   type: 'state_change',
                   state: updated.state,
@@ -229,7 +233,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
             if (updated.steps && updated.steps.length > 0) {
               const latestStep = updated.steps[updated.steps.length - 1];
               if (latestStep && latestStep.completed_at) {
-                reply.send(
+                reply.raw.write(
                   `data: ${JSON.stringify({
                     type: 'step_update',
                     step: latestStep,
@@ -245,7 +249,7 @@ export async function taskRoutes(fastify: FastifyInstance) {
               updated.state === 'failed'
             ) {
               clearInterval(pollInterval);
-              reply.send(
+              reply.raw.write(
                 `data: ${JSON.stringify({
                   type: 'completed',
                   finalState: updated.state,
@@ -253,38 +257,45 @@ export async function taskRoutes(fastify: FastifyInstance) {
                   timestamp: new Date().toISOString(),
                 })}\n\n`
               );
+              streamClosed = true;
+              reply.raw.end();
               return;
             }
 
             // Timeout after 60 seconds
             if (pollCount >= maxPolls) {
               clearInterval(pollInterval);
-              reply.send(
+              reply.raw.write(
                 `data: ${JSON.stringify({
                   type: 'timeout',
                   message: 'Task monitoring timeout (60s)',
                   timestamp: new Date().toISOString(),
                 })}\n\n`
               );
+              streamClosed = true;
+              reply.raw.end();
               return;
             }
           } catch (pollErr) {
             const errMsg = pollErr instanceof Error ? pollErr.message : 'Unknown error';
             fastify.log.error(errMsg);
             clearInterval(pollInterval);
-            reply.send(
+            reply.raw.write(
               `data: ${JSON.stringify({
                 type: 'error',
                 message: errMsg,
                 timestamp: new Date().toISOString(),
               })}\n\n`
             );
+            streamClosed = true;
+            reply.raw.end();
           }
         }, 500);
 
         // Clean up interval if client disconnects
         request.socket.on('close', () => {
           clearInterval(pollInterval);
+          streamClosed = true;
         });
       } catch (error) {
         fastify.log.error(error);

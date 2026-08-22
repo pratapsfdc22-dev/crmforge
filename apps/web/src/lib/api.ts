@@ -54,7 +54,7 @@ export function subscribeToTaskEvents(
   onClose?: () => void
 ): () => void {
   const url = new URL(`${API_URL}/tasks/${taskId}/events`);
-  url.searchParams.set('X-Test-Org', TEST_ORG_ID);
+  url.searchParams.set('x-test-org', TEST_ORG_ID);
 
   const eventSource = new EventSource(url.toString());
 
